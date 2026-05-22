@@ -43,3 +43,6 @@ next-env.d.ts
 # bot-whatsapp
 /bot-whatsapp/node_modules/
 /bot-whatsapp/.env
+
+# private local credentials
+/secrets-local.json
