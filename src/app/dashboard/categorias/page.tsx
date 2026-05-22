@@ -16,7 +16,8 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Tags, Plus, Loader2, AlertCircle } from "lucide-react";
+import { Tags, Plus, Loader2, AlertCircle, DollarSign } from "lucide-react";
+import { formatCurrency } from "@/lib/format";
 
 interface CategoryItem {
   id: string;
@@ -24,6 +25,8 @@ interface CategoryItem {
   description: string | null;
   is_active: boolean;
   created_at?: string;
+  total_spent?: number;
+  expense_count?: number;
 }
 
 export default function CategoriasPage() {
@@ -72,12 +75,33 @@ export default function CategoriasPage() {
       setLoading(true);
       const { data, error: catError } = await supabase
         .from("expense_categories")
-        .select("*")
+        .select(`
+          *,
+          expenses (
+            total_amount
+          )
+        `)
         .eq("organization_id", userProfile.organization_id)
         .order("name", { ascending: true });
 
       if (catError) throw catError;
-      setCategories(data || []);
+
+      const categoriesWithTotals = (data || []).map((cat: any) => {
+        const expenses = cat.expenses || [];
+        const total_spent = expenses.reduce((sum: number, exp: any) => sum + Number(exp.total_amount || 0), 0);
+        const expense_count = expenses.length;
+        return {
+          id: cat.id,
+          name: cat.name,
+          description: cat.description,
+          is_active: cat.is_active,
+          created_at: cat.created_at,
+          total_spent,
+          expense_count,
+        };
+      });
+
+      setCategories(categoriesWithTotals);
       setError(null);
     } catch (err) {
       console.error("Error loading categories:", err);
@@ -249,6 +273,15 @@ export default function CategoriasPage() {
                   {!cat.is_active && (
                     <Badge variant="secondary" className="text-[10px] shrink-0">Inactiva</Badge>
                   )}
+                </div>
+                <div className="flex items-center justify-between mt-4 pt-3 border-t border-border/40">
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <DollarSign className="w-3.5 h-3.5 text-muted-foreground/75" />
+                    <span className="font-medium text-foreground">{formatCurrency(cat.total_spent ?? 0)}</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    {cat.expense_count ?? 0} gasto{(cat.expense_count ?? 0) !== 1 ? "s" : ""}
+                  </span>
                 </div>
               </CardContent>
             </Card>
