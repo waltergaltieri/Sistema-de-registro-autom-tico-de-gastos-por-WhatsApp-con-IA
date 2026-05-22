@@ -43,7 +43,7 @@ const navigation = [
   { name: "Gastos", href: "/dashboard/gastos", icon: Table2, roles: ["super_admin", "admin", "partner", "readonly"] },
   { name: "Categorías", href: "/dashboard/categorias", icon: Tags, roles: ["super_admin", "admin"] },
   { name: "Socios", href: "/dashboard/socios", icon: Users, roles: ["super_admin", "admin"] },
-  { name: "Grupos WhatsApp", href: "/dashboard/grupos", icon: MessageSquare, roles: ["super_admin"] },
+  { name: "Grupos WhatsApp", href: "/dashboard/grupos", icon: MessageSquare, roles: ["super_admin", "admin"] },
   { name: "Exportar", href: "/dashboard/exportar", icon: FileDown, roles: ["super_admin", "admin"] },
   { name: "Logs", href: "/dashboard/logs", icon: AlertCircle, roles: ["super_admin", "admin"] },
 ];
