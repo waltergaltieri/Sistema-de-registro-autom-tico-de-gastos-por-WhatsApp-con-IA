@@ -1,0 +1,14 @@
+{
+  "name": "gastos-socios-bot",
+  "version": "1.0.0",
+  "description": "WhatsApp bot service for Gastos Socios",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@open-wa/wa-automate": "^4.71.0",
+    "dotenv": "^16.4.0"
+  }
+}
