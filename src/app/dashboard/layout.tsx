@@ -58,12 +58,15 @@ const roleLabels: Record<string, string> = {
 function SidebarContent({
   onNavigate,
   userProfile,
+  botStatus,
 }: {
   onNavigate?: () => void;
   userProfile: UserProfile | null;
+  botStatus: string;
 }) {
   const pathname = usePathname();
   const userRole = userProfile?.role || "partner";
+  const isAdmin = userRole === "super_admin" || userRole === "admin";
 
   const filteredNavigation = navigation.filter((item) =>
     item.roles.includes(userRole)
@@ -72,15 +75,44 @@ function SidebarContent({
   return (
     <div className="flex flex-col h-full">
       {/* Logo */}
-      <div className="flex items-center gap-3 px-6 py-5">
-        <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-primary text-primary-foreground shadow-md shadow-primary/20">
-          <Receipt className="w-5 h-5" />
-        </div>
-        <div>
-          <h2 className="font-bold text-base tracking-tight">Gastos Socios</h2>
-          <p className="text-[11px] text-muted-foreground -mt-0.5">Control de gastos</p>
+      <div className="flex items-center justify-between px-6 py-5">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-primary text-primary-foreground shadow-md shadow-primary/20">
+            <Receipt className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="font-bold text-base tracking-tight">Gastos Socios</h2>
+            <p className="text-[11px] text-muted-foreground -mt-0.5">Control de gastos</p>
+          </div>
         </div>
       </div>
+
+      {isAdmin && (
+        <div className="px-6 pb-4">
+          <Link
+            href="/vincular"
+            target="_blank"
+            className={cn(
+              "flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[11px] font-medium transition-all hover:bg-accent w-full",
+              botStatus === "conectado" && "bg-green-500/5 text-green-600 border-green-500/20 dark:text-green-400 dark:border-green-500/10",
+              botStatus === "esperando_vinculacion" && "bg-amber-500/5 text-amber-600 border-amber-500/20 dark:text-amber-400 dark:border-amber-500/10 animate-pulse",
+              botStatus === "desconectado" && "bg-destructive/5 text-destructive border-destructive/20"
+            )}
+          >
+            <span className={cn(
+              "w-1.5 h-1.5 rounded-full shrink-0",
+              botStatus === "conectado" && "bg-green-500",
+              botStatus === "esperando_vinculacion" && "bg-amber-500",
+              botStatus === "desconectado" && "bg-destructive"
+            )} />
+            <span className="truncate">
+              {botStatus === "conectado" && "🤖 Bot: En Línea"}
+              {botStatus === "esperando_vinculacion" && "🤖 Bot: Vinculando"}
+              {botStatus === "desconectado" && "🤖 Bot: Desconectado"}
+            </span>
+          </Link>
+        </div>
+      )}
 
       <Separator className="mx-4 w-auto" />
 
@@ -183,6 +215,7 @@ export default function DashboardLayout({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [botStatus, setBotStatus] = useState<string>("desconectado");
   const supabase = createClient();
 
   useEffect(() => {
@@ -208,6 +241,30 @@ export default function DashboardLayout({
     loadProfile();
   }, [supabase]);
 
+  useEffect(() => {
+    const userRole = userProfile?.role;
+    const isAdmin = userRole === "super_admin" || userRole === "admin";
+    if (!isAdmin) return;
+
+    async function checkStatus() {
+      try {
+        const res = await fetch("/api/bot/status");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ok) {
+            setBotStatus(data.status);
+          }
+        }
+      } catch (err) {
+        console.error("Error checking bot status:", err);
+      }
+    }
+
+    checkStatus();
+    const interval = setInterval(checkStatus, 10000);
+    return () => clearInterval(interval);
+  }, [userProfile]);
+
   if (loading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-background">
@@ -223,7 +280,7 @@ export default function DashboardLayout({
     <div className="flex h-screen overflow-hidden bg-background">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex lg:w-64 lg:flex-col border-r border-border bg-sidebar">
-        <SidebarContent userProfile={userProfile} />
+        <SidebarContent userProfile={userProfile} botStatus={botStatus} />
       </aside>
 
       {/* Mobile Sidebar */}
@@ -240,7 +297,7 @@ export default function DashboardLayout({
               <X className="h-4 w-4" />
             </Button>
           </div>
-          <SidebarContent userProfile={userProfile} onNavigate={() => setMobileOpen(false)} />
+          <SidebarContent userProfile={userProfile} botStatus={botStatus} onNavigate={() => setMobileOpen(false)} />
         </SheetContent>
       </Sheet>
 
@@ -263,6 +320,30 @@ export default function DashboardLayout({
             </div>
             <span className="font-semibold text-sm">Gastos Socios</span>
           </div>
+          {userProfile && (userProfile.role === "super_admin" || userProfile.role === "admin") && (
+            <Link
+              href="/vincular"
+              target="_blank"
+              className={cn(
+                "ml-auto flex items-center gap-1.5 px-2 py-1 rounded-full border text-[10px] font-medium transition-all hover:bg-accent",
+                botStatus === "conectado" && "bg-green-500/5 text-green-600 border-green-500/20 dark:text-green-400 dark:border-green-500/10",
+                botStatus === "esperando_vinculacion" && "bg-amber-500/5 text-amber-600 border-amber-500/20 dark:text-amber-400 dark:border-amber-500/10 animate-pulse",
+                botStatus === "desconectado" && "bg-destructive/5 text-destructive border-destructive/20"
+              )}
+            >
+              <span className={cn(
+                "w-1.5 h-1.5 rounded-full shrink-0",
+                botStatus === "conectado" && "bg-green-500",
+                botStatus === "esperando_vinculacion" && "bg-amber-500",
+                botStatus === "desconectado" && "bg-destructive"
+              )} />
+              <span>
+                {botStatus === "conectado" && "En Línea"}
+                {botStatus === "esperando_vinculacion" && "Vinculando"}
+                {botStatus === "desconectado" && "Desconectado"}
+              </span>
+            </Link>
+          )}
         </header>
 
         {/* Page content */}

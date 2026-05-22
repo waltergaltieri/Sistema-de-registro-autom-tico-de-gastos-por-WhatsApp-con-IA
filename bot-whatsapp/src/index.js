@@ -39,9 +39,64 @@ async function syncGroups(client) {
   }
 }
 
+async function checkPendingCommands(client) {
+  try {
+    const response = await sendToBackend("/api/bot/commands", { action: "poll" });
+    if (response?.ok && response.commands && response.commands.length > 0) {
+      for (const cmd of response.commands) {
+        console.log(`🤖 Ejecutando comando recibido: ${cmd.command} (ID: ${cmd.id})`);
+        
+        try {
+          if (cmd.command === "send_test_message") {
+            const { chat_id, message_text } = cmd.payload;
+            if (!chat_id || !message_text) {
+              throw new Error("Faltan parámetros chat_id o message_text en el payload");
+            }
+            
+            await client.sendText(chat_id, message_text);
+            console.log(`✅ Mensaje de prueba enviado a ${chat_id}`);
+            
+            await sendToBackend("/api/bot/commands", {
+              action: "resolve",
+              command_id: cmd.id,
+              status: "completed"
+            });
+          } else {
+            throw new Error(`Comando no reconocido: ${cmd.command}`);
+          }
+        } catch (execError) {
+          console.error(`❌ Error ejecutando comando ${cmd.id}:`, execError.message);
+          
+          await sendToBackend("/api/bot/commands", {
+            action: "resolve",
+            command_id: cmd.id,
+            status: "failed",
+            error_message: execError.message
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error("❌ Error en checkPendingCommands:", error.message);
+  }
+}
+
 async function start(client) {
   console.log("✅ Bot de Gastos Socios iniciado");
   console.log(`🌐 API URL: ${API_URL}`);
+
+  // Notify backend that bot is connected
+  await sendToBackend("/api/bot/qr-status", {
+    status: "conectado"
+  });
+
+  // Listen to state changes
+  client.onStateChanged(async (state) => {
+    console.log(`🔄 Estado de la sesión cambiado a: ${state}`);
+    if (state === "CONFLICT" || state === "UNLAUNCHED" || state === "UNPAIRED" || state === "DISCONNECTED") {
+      await sendToBackend("/api/bot/qr-status", { status: "desconectado" });
+    }
+  });
 
   // 1. Initial synchronization
   await syncGroups(client);
@@ -50,6 +105,12 @@ async function start(client) {
   setInterval(async () => {
     await syncGroups(client);
   }, 10 * 60 * 1000);
+
+  // 2b. Initial commands check and start polling loop
+  await checkPendingCommands(client);
+  setInterval(async () => {
+    await checkPendingCommands(client);
+  }, 4000);
 
   // 3. Listen to being added to groups
   client.onAddedToGroup(async (chat) => {
@@ -219,10 +280,22 @@ create({
   logConsole: false,
   popup: true,
   qrTimeout: 0,
+  qrCallback: async (qrCodeDataUrl) => {
+    console.log("📲 Nuevo código QR de WhatsApp generado. Enviando al backend...");
+    await sendToBackend("/api/bot/qr-status", {
+      status: "esperando_vinculacion",
+      qr_code: qrCodeDataUrl
+    });
+  }
 })
   .then((client) => start(client))
-  .catch((err) => {
+  .catch(async (err) => {
     console.error("❌ Error iniciando OpenWA:", err);
+    try {
+      await sendToBackend("/api/bot/qr-status", { status: "desconectado" });
+    } catch (e) {
+      console.error("❌ Error al notificar desconexión:", e.message);
+    }
     process.exit(1);
   });
 
