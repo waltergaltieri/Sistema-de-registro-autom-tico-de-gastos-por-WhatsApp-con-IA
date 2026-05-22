@@ -1,19 +1,67 @@
 require("dotenv").config();
 const { create } = require("@open-wa/wa-automate");
 
-const AUTHORIZED_GROUP_ID = process.env.AUTHORIZED_WHATSAPP_GROUP_ID;
 const API_URL = process.env.PROCESSING_API_URL;
 const WEBHOOK_SECRET = process.env.BOT_WEBHOOK_SECRET;
 
+async function syncGroups(client) {
+  try {
+    console.log("🔄 Sincronizando grupos de WhatsApp...");
+    const chats = await client.getAllGroups();
+    const groups = [];
+
+    for (const chat of chats) {
+      try {
+        const participants = await client.getGroupMembers(chat.id);
+        groups.push({
+          id: chat.id,
+          name: chat.name || chat.formattedTitle || "Grupo sin nombre",
+          is_active: true,
+          member_count: participants.length,
+          participants: participants.map((p) => ({
+            phone: p.id.replace("@c.us", ""),
+            pushname: p.pushname || p.name || p.formattedName || "Sin nombre",
+          })),
+        });
+      } catch (chatError) {
+        console.error(`❌ Error obteniendo miembros para el grupo ${chat.id}:`, chatError.message);
+      }
+    }
+
+    const response = await sendToBackend("/api/bot/sync-groups", { groups });
+    if (response?.ok) {
+      console.log(`✅ Sincronizados ${groups.length} grupos con el backend.`);
+    } else {
+      console.error("❌ Falló la sincronización de grupos con el backend:", response);
+    }
+  } catch (error) {
+    console.error("❌ Error en syncGroups:", error);
+  }
+}
+
 async function start(client) {
   console.log("✅ Bot de Gastos Socios iniciado");
-  console.log(`📱 Grupo autorizado: ${AUTHORIZED_GROUP_ID}`);
   console.log(`🌐 API URL: ${API_URL}`);
 
+  // 1. Initial synchronization
+  await syncGroups(client);
+
+  // 2. Set interval to sync groups every 10 minutes
+  setInterval(async () => {
+    await syncGroups(client);
+  }, 10 * 60 * 1000);
+
+  // 3. Listen to being added to groups
+  client.onAddedToGroup(async (chat) => {
+    console.log(`➕ Bot añadido al grupo: ${chat.name || chat.id}`);
+    await syncGroups(client);
+  });
+
+  // 4. Message handler
   client.onMessage(async (message) => {
     try {
-      // Only process messages from the authorized group
-      if (message.chatId !== AUTHORIZED_GROUP_ID) return;
+      // Only process messages from groups
+      if (!message.chatId.endsWith("@g.us")) return;
 
       const messageText = message.body || message.caption || "";
 
@@ -61,17 +109,13 @@ async function start(client) {
       }
 
       console.log(
-        `📷 Comprobante recibido de ${message.sender.pushname} (${message.mimetype})`
+        `📷 Comprobante recibido de ${message.sender.pushname} (${message.mimetype}) en grupo ${message.chatId}`
       );
 
       // Download the media
       const mediaData = await client.decryptFile(message);
       if (!mediaData) {
         console.error("❌ No se pudo descargar el archivo");
-        await client.sendText(
-          message.chatId,
-          "⚠️ No pude descargar el archivo. Intentá enviarlo de nuevo."
-        );
         return;
       }
 
@@ -113,7 +157,7 @@ async function start(client) {
         payload
       );
 
-      // Reply in group
+      // Reply in group (only if response.reply_text is provided and not null)
       if (response?.reply_text) {
         await client.sendText(message.chatId, response.reply_text);
       }
@@ -123,14 +167,6 @@ async function start(client) {
       }
     } catch (error) {
       console.error("❌ Error procesando mensaje:", error);
-      try {
-        await client.sendText(
-          message.chatId,
-          "⚠️ No pude procesar el comprobante. Revisalo desde el dashboard o volvé a enviarlo."
-        );
-      } catch (replyError) {
-        console.error("❌ Error enviando respuesta:", replyError);
-      }
     }
   });
 }
@@ -156,12 +192,16 @@ async function sendToBackend(path, body) {
 
     if (!response.ok) {
       console.error(`❌ API error ${response.status}:`, data);
+      // If the group is not authorized (403), return silently so we don't spam
+      if (response.status === 403) {
+        return { ok: false, error: "Group not authorized", reply_text: null };
+      }
     }
 
     return data;
   } catch (error) {
     console.error("❌ Error comunicando con backend:", error.message);
-    return { ok: false, reply_text: "⚠️ Error de conexión con el servidor." };
+    return { ok: false, reply_text: null };
   }
 }
 
@@ -185,3 +225,4 @@ create({
     console.error("❌ Error iniciando OpenWA:", err);
     process.exit(1);
   });
+

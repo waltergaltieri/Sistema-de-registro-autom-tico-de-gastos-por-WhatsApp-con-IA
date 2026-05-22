@@ -15,10 +15,14 @@ export interface UserProfile {
   auth_user_id: string | null;
   organization_id: string;
   full_name: string;
+  last_name: string | null;
   email: string | null;
   whatsapp_phone: string;
-  role: "admin" | "partner" | "readonly";
+  role: "super_admin" | "admin" | "partner" | "readonly";
   is_active: boolean;
+  color: string | null;
+  dni: string | null;
+  cuil: string | null;
   created_at: string;
   updated_at: string;
 }

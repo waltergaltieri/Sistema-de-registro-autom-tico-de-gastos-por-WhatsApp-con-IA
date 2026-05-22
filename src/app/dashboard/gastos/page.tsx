@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,103 +51,148 @@ import {
   FileImage,
   Receipt,
   AlertTriangle,
-  ArrowUpDown,
   Download,
   Plus,
-  X,
+  Loader2,
+  AlertCircle,
+  Calendar,
 } from "lucide-react";
 import { formatCurrency, formatDate, getStatusInfo, getConfidenceInfo } from "@/lib/format";
-import type { Expense, ReviewStatus } from "@/lib/types";
+import type { Expense, ReviewStatus, ExpenseCategory, UserProfile } from "@/lib/types";
 
-// ============================================================
-// Demo expenses
-// ============================================================
-
-const demoExpenses: Partial<Expense>[] = [
-  {
-    id: 1, expense_date: "2026-05-21", created_at: "2026-05-21T18:30:00Z",
-    supplier_name: "Easy", description: "Compra de pintura y materiales",
-    total_amount: 48500, currency: "ARS", payment_method: "debito",
-    review_status: "pending", ai_confidence: 0.92,
-    whatsapp_sender_name: "Walter",
-    category: { id: "1", organization_id: "", name: "Materiales", is_active: true, created_at: "", description: null },
-  },
-  {
-    id: 2, expense_date: "2026-05-20", created_at: "2026-05-20T14:20:00Z",
-    supplier_name: "Flete Rápido", description: "Flete materiales obra",
-    total_amount: 22000, currency: "ARS", payment_method: "efectivo",
-    review_status: "reviewed", ai_confidence: 0.88,
-    whatsapp_sender_name: "Ana",
-    category: { id: "2", organization_id: "", name: "Transporte / envíos", is_active: true, created_at: "", description: null },
-  },
-  {
-    id: 3, expense_date: "2026-05-19", created_at: "2026-05-19T10:45:00Z",
-    supplier_name: "Pinturería Central", description: "Pintura y rodillos para local",
-    total_amount: 90000, currency: "ARS", payment_method: "transferencia",
-    review_status: "corrected", ai_confidence: 0.65,
-    whatsapp_sender_name: "Lucía",
-    category: { id: "3", organization_id: "", name: "Obra / remodelación", is_active: true, created_at: "", description: null },
-  },
-  {
-    id: 4, expense_date: "2026-05-18", created_at: "2026-05-18T09:00:00Z",
-    supplier_name: "Inmobiliaria Sur", description: "Seña del local comercial",
-    total_amount: 500000, currency: "ARS", payment_method: "transferencia",
-    review_status: "reviewed", ai_confidence: 0.95,
-    whatsapp_sender_name: "Marlon",
-    category: { id: "4", organization_id: "", name: "Alquiler / seña", is_active: true, created_at: "", description: null },
-  },
-  {
-    id: 5, expense_date: "2026-05-17", created_at: "2026-05-17T16:30:00Z",
-    supplier_name: "Starbucks", description: "Café reunión de socios",
-    total_amount: 12300, currency: "ARS", payment_method: "debito",
-    review_status: "pending", ai_confidence: 0.78,
-    whatsapp_sender_name: "Walter",
-    category: { id: "5", organization_id: "", name: "Comida / reuniones", is_active: true, created_at: "", description: null },
-  },
-  {
-    id: 6, expense_date: "2026-05-16", created_at: "2026-05-16T11:00:00Z",
-    supplier_name: "MercadoLibre", description: "Cajas organizadoras",
-    total_amount: 35000, currency: "ARS", payment_method: "mercado_pago",
-    review_status: "rejected", ai_confidence: 0.42,
-    whatsapp_sender_name: "Ana",
-    category: { id: "6", organization_id: "", name: "Mobiliario", is_active: true, created_at: "", description: null },
-  },
-  {
-    id: 7, expense_date: "2026-05-15", created_at: "2026-05-15T08:20:00Z",
-    supplier_name: "Diseñador Gráfico", description: "Logo y branding negocio",
-    total_amount: 120000, currency: "ARS", payment_method: "transferencia",
-    review_status: "reviewed", ai_confidence: 0.91,
-    whatsapp_sender_name: "Lucía",
-    category: { id: "7", organization_id: "", name: "Diseño / branding", is_active: true, created_at: "", description: null },
-  },
-];
-
-const categories = [
-  "Alquiler / seña", "Obra / remodelación", "Materiales", "Mobiliario",
-  "Marketing", "Diseño / branding", "Transporte / envíos", "Comida / reuniones",
-  "Servicios", "Tecnología", "Otros",
-];
-
-const partners = ["Walter", "Marlon", "Ana", "Lucía"];
+const DEFAULT_PARTNER_COLOR = "#6b7280";
 
 export default function GastosPage() {
+  const supabase = createClient();
+  const [loading, setLoading] = useState(true);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [categories, setCategories] = useState<ExpenseCategory[]>([]);
+  const [partners, setPartners] = useState<UserProfile[]>([]);
+  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
+
+  // Filters state
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [partnerFilter, setPartnerFilter] = useState<string>("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [showFilters, setShowFilters] = useState(false);
-  const [selectedExpense, setSelectedExpense] = useState<Partial<Expense> | null>(null);
-  const [editExpense, setEditExpense] = useState<Partial<Expense> | null>(null);
 
-  const filteredExpenses = demoExpenses.filter((exp) => {
+  // Dialogs state
+  const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
+  const [editExpense, setEditExpense] = useState<Partial<Expense> | null>(null);
+  const [showNew, setShowNew] = useState(false);
+
+  async function loadData() {
+    try {
+      setLoading(true);
+
+      // 1. Get current user profile for organization_id
+      const { data: { user } } = await supabase.auth.getUser();
+      let orgId = "";
+      if (user) {
+        const { data: profile } = await supabase
+          .from("users_profile")
+          .select("*")
+          .eq("auth_user_id", user.id)
+          .maybeSingle();
+        if (profile) {
+          setCurrentUserProfile(profile);
+          orgId = profile.organization_id;
+        }
+      }
+
+      // 2. Load categories
+      const { data: categoriesData } = await supabase
+        .from("expense_categories")
+        .select("*")
+        .eq("is_active", true)
+        .order("name", { ascending: true });
+      setCategories(categoriesData || []);
+
+      // 3. Load partners
+      const { data: partnersData } = await supabase
+        .from("users_profile")
+        .select("*")
+        .order("full_name", { ascending: true });
+      setPartners(partnersData || []);
+
+      // 4. Load expenses
+      const { data: expensesData, error } = await supabase
+        .from("expenses")
+        .select(`
+          *,
+          category:expense_categories(*),
+          created_by:users_profile(*)
+        `)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setExpenses((expensesData || []) as Expense[]);
+    } catch (err) {
+      console.error("Error loading expenses page data:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadData();
+  }, [supabase]);
+
+  // Quick action: update review status directly
+  async function handleStatusUpdate(id: number, newStatus: ReviewStatus) {
+    try {
+      const { error } = await supabase
+        .from("expenses")
+        .update({
+          review_status: newStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+
+      if (error) throw error;
+
+      // Reload
+      loadData();
+      if (selectedExpense?.id === id) {
+        setSelectedExpense(prev => prev ? { ...prev, review_status: newStatus } : null);
+      }
+    } catch (err) {
+      console.error("Error updating status:", err);
+      alert("Error al actualizar el estado del gasto");
+    }
+  }
+
+  // Filter logic client-side
+  const filteredExpenses = expenses.filter((exp) => {
     if (search) {
       const q = search.toLowerCase();
+      const partnerName = exp.created_by
+        ? `${exp.created_by.full_name} ${exp.created_by.last_name || ""}`.trim().toLowerCase()
+        : exp.whatsapp_sender_name?.toLowerCase() || "";
+
       const matches =
         exp.supplier_name?.toLowerCase().includes(q) ||
         exp.description?.toLowerCase().includes(q) ||
-        exp.whatsapp_sender_name?.toLowerCase().includes(q) ||
-        exp.id?.toString().includes(q);
+        partnerName.includes(q) ||
+        exp.id.toString().includes(q);
+
       if (!matches) return false;
     }
+
     if (statusFilter !== "all" && exp.review_status !== statusFilter) return false;
+    if (categoryFilter !== "all" && exp.category_id !== categoryFilter) return false;
+    if (partnerFilter !== "all" && exp.created_by_profile_id !== partnerFilter) return false;
+
+    const expDateStr = exp.expense_date || exp.created_at;
+    if (expDateStr) {
+      const expDate = expDateStr.split("T")[0]; // YYYY-MM-DD
+      if (dateFrom && expDate < dateFrom) return false;
+      if (dateTo && expDate > dateTo) return false;
+    }
+
     return true;
   });
 
@@ -156,23 +203,22 @@ export default function GastosPage() {
         <div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Gastos</h1>
           <p className="text-muted-foreground mt-1">
-            {filteredExpenses.length} registros encontrados
+            {filteredExpenses.length} comprobantes encontrados
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-2">
-            <Download className="w-4 h-4" />
-            <span className="hidden sm:inline">Exportar CSV</span>
-          </Button>
-          <Button size="sm" className="gap-2 shadow-md shadow-primary/20">
-            <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Nuevo gasto</span>
+          <Button
+            size="sm"
+            className="gap-2 shadow-md shadow-primary/20 bg-primary hover:bg-primary/90"
+            onClick={() => setShowNew(true)}
+          >
+            <Plus className="w-4 h-4" /> Nuevo gasto
           </Button>
         </div>
       </div>
 
       {/* Filters */}
-      <Card className="shadow-sm">
+      <Card className="shadow-sm border border-border/60">
         <CardContent className="p-4">
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="relative flex-1">
@@ -184,7 +230,8 @@ export default function GastosPage() {
                 className="pl-9 h-10"
               />
             </div>
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v ?? "all")}>
+            
+            <Select value={statusFilter} onValueChange={(val) => setStatusFilter(val || "all")}>
               <SelectTrigger className="w-full sm:w-44 h-10">
                 <SelectValue placeholder="Estado" />
               </SelectTrigger>
@@ -196,10 +243,11 @@ export default function GastosPage() {
                 <SelectItem value="rejected">Rechazado</SelectItem>
               </SelectContent>
             </Select>
+
             <Button
               variant="outline"
               size="icon"
-              className="h-10 w-10 shrink-0"
+              className={`h-10 w-10 shrink-0 ${showFilters ? "bg-accent text-accent-foreground border-accent-foreground/20" : ""}`}
               onClick={() => setShowFilters(!showFilters)}
             >
               <Filter className="w-4 h-4" />
@@ -207,27 +255,47 @@ export default function GastosPage() {
           </div>
 
           {showFilters && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 pt-4 border-t animate-fade-in">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mt-4 pt-4 border-t border-border/60 animate-fade-in">
               <div>
-                <Label className="text-xs text-muted-foreground mb-1.5 block">Fecha desde</Label>
-                <Input type="date" className="h-9" />
+                <Label className="text-xs text-muted-foreground mb-1.5 block">Socio</Label>
+                <Select value={partnerFilter} onValueChange={(val) => setPartnerFilter(val || "all")}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    {partners.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.full_name} {p.last_name || ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <div>
-                <Label className="text-xs text-muted-foreground mb-1.5 block">Fecha hasta</Label>
-                <Input type="date" className="h-9" />
-              </div>
+              
               <div>
                 <Label className="text-xs text-muted-foreground mb-1.5 block">Categoría</Label>
-                <Select>
+                <Select value={categoryFilter} onValueChange={(val) => setCategoryFilter(val || "all")}>
                   <SelectTrigger className="h-9">
                     <SelectValue placeholder="Todas" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="all">Todas</SelectItem>
                     {categories.map((c) => (
-                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1.5 block">Fecha desde</Label>
+                <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-9" />
+              </div>
+
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1.5 block">Fecha hasta</Label>
+                <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-9" />
               </div>
             </div>
           )}
@@ -235,111 +303,135 @@ export default function GastosPage() {
       </Card>
 
       {/* Table */}
-      <Card className="shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="w-16">#</TableHead>
-                <TableHead>Fecha</TableHead>
-                <TableHead>Socio</TableHead>
-                <TableHead>Proveedor</TableHead>
-                <TableHead>Categoría</TableHead>
-                <TableHead className="hidden md:table-cell">Descripción</TableHead>
-                <TableHead className="text-right">Monto</TableHead>
-                <TableHead className="hidden sm:table-cell">Pago</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead className="hidden lg:table-cell">IA</TableHead>
-                <TableHead className="w-12" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredExpenses.map((exp) => {
-                const status = getStatusInfo(exp.review_status || "pending");
-                const confidence = getConfidenceInfo(exp.ai_confidence ?? null);
-                return (
-                  <TableRow
-                    key={exp.id}
-                    className="cursor-pointer group"
-                    onClick={() => setSelectedExpense(exp)}
-                  >
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {exp.id}
-                    </TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
-                      {formatDate(exp.expense_date || null)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary">
-                          {exp.whatsapp_sender_name?.[0]}
-                        </div>
-                        <span className="text-sm">{exp.whatsapp_sender_name}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm font-medium max-w-[150px] truncate">
-                      {exp.supplier_name}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className="text-xs font-normal whitespace-nowrap">
-                        {exp.category?.name || "—"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell text-sm text-muted-foreground max-w-[200px] truncate">
-                      {exp.description}
-                    </TableCell>
-                    <TableCell className="text-right font-semibold text-sm whitespace-nowrap">
-                      {formatCurrency(exp.total_amount || 0, exp.currency)}
-                    </TableCell>
-                    <TableCell className="hidden sm:table-cell text-xs text-muted-foreground capitalize whitespace-nowrap">
-                      {exp.payment_method?.replace("_", " ") || "—"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={status.variant} className="gap-1.5 text-xs">
-                        <div className={`w-1.5 h-1.5 rounded-full ${status.dotColor}`} />
-                        {status.label}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="hidden lg:table-cell">
-                      <span className={`text-xs font-medium ${confidence.color}`}>
-                        {exp.ai_confidence ? `${Math.round(exp.ai_confidence * 100)}%` : "—"}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger onClick={(e) => e.stopPropagation()} className="opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48">
-                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setSelectedExpense(exp); }}>
-                            <Eye className="mr-2 h-4 w-4" /> Ver detalle
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setEditExpense(exp); }}>
-                            <Pencil className="mr-2 h-4 w-4" /> Editar
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={(e) => e.stopPropagation()}>
-                            <CheckCircle2 className="mr-2 h-4 w-4 text-success" /> Marcar revisado
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={(e) => e.stopPropagation()} className="text-destructive focus:text-destructive">
-                            <XCircle className="mr-2 h-4 w-4" /> Rechazar
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={(e) => e.stopPropagation()}>
-                            <FileImage className="mr-2 h-4 w-4" /> Ver comprobante
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+      {loading ? (
+        <div className="h-[40vh] flex items-center justify-center">
+          <div className="flex flex-col items-center gap-2">
+            <Loader2 className="w-8 h-8 text-primary animate-spin" />
+            <p className="text-sm text-muted-foreground">Cargando comprobantes...</p>
+          </div>
+        </div>
+      ) : (
+        <Card className="shadow-sm overflow-hidden border border-border/60">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-16">#</TableHead>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead>Socio</TableHead>
+                  <TableHead>Proveedor</TableHead>
+                  <TableHead>Categoría</TableHead>
+                  <TableHead className="hidden md:table-cell">Descripción</TableHead>
+                  <TableHead className="text-right">Monto</TableHead>
+                  <TableHead className="hidden sm:table-cell">Pago</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead className="hidden lg:table-cell">IA</TableHead>
+                  <TableHead className="w-12" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredExpenses.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={11} className="h-32 text-center text-sm text-muted-foreground">
+                      No se encontraron gastos con los filtros aplicados.
                     </TableCell>
                   </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
+                ) : (
+                  filteredExpenses.map((exp) => {
+                    const status = getStatusInfo(exp.review_status || "pending");
+                    const confidence = getConfidenceInfo(exp.ai_confidence ?? null);
+                    
+                    const partnerName = exp.created_by
+                      ? `${exp.created_by.full_name} ${exp.created_by.last_name || ""}`.trim()
+                      : exp.whatsapp_sender_name || "Desconocido";
+
+                    const initials = exp.created_by?.full_name ? exp.created_by.full_name[0].toUpperCase() : (exp.whatsapp_sender_name?.[0] || "?");
+                    const partnerColor = exp.created_by?.color || DEFAULT_PARTNER_COLOR;
+                    const avatarStyle = { backgroundColor: `${partnerColor}15`, color: partnerColor };
+
+                    return (
+                      <TableRow
+                        key={exp.id}
+                        className="cursor-pointer group hover:bg-muted/40 transition-colors"
+                        onClick={() => setSelectedExpense(exp)}
+                      >
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {exp.id}
+                        </TableCell>
+                        <TableCell className="text-sm whitespace-nowrap">
+                          {formatDate(exp.expense_date || null)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Avatar className="h-6 w-6 border border-border/10 shrink-0">
+                              <AvatarFallback className="text-[10px] font-bold" style={avatarStyle}>
+                                {initials}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="text-sm font-medium truncate max-w-[110px]">{partnerName}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm font-semibold max-w-[130px] truncate">
+                          {exp.supplier_name || "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="secondary" className="text-xs font-normal whitespace-nowrap bg-muted border-0">
+                            {exp.category?.name || "Otros"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground max-w-[180px] truncate">
+                          {exp.description || "—"}
+                        </TableCell>
+                        <TableCell className="text-right font-bold text-sm whitespace-nowrap">
+                          {formatCurrency(exp.total_amount || 0, exp.currency)}
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell text-xs text-muted-foreground capitalize whitespace-nowrap">
+                          {exp.payment_method?.replace("_", " ") || "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={status.variant} className="gap-1.5 text-xs py-0.5 border">
+                            <div className={`w-1.5 h-1.5 rounded-full ${status.dotColor}`} />
+                            {status.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="hidden lg:table-cell">
+                          <span className={`text-xs font-semibold ${confidence.color}`}>
+                            {exp.ai_confidence ? `${Math.round(exp.ai_confidence * 100)}%` : "—"}
+                          </span>
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger render={
+                              <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            } />
+                            <DropdownMenuContent align="end" className="w-48">
+                              <DropdownMenuItem onClick={() => setSelectedExpense(exp)}>
+                                <Eye className="mr-2 h-4 w-4" /> Ver detalle
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setEditExpense(exp)}>
+                                <Pencil className="mr-2 h-4 w-4" /> Editar
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem onClick={() => handleStatusUpdate(exp.id, "reviewed")} className="text-emerald-500 focus:text-emerald-500">
+                                <CheckCircle2 className="mr-2 h-4 w-4" /> Marcar revisado
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleStatusUpdate(exp.id, "rejected")} className="text-destructive focus:text-destructive">
+                                <XCircle className="mr-2 h-4 w-4" /> Rechazar
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </Card>
+      )}
 
       {/* Detail Dialog */}
       <ExpenseDetailDialog
@@ -349,13 +441,23 @@ export default function GastosPage() {
           setEditExpense(selectedExpense);
           setSelectedExpense(null);
         }}
+        onStatusUpdate={handleStatusUpdate}
       />
 
-      {/* Edit Dialog */}
-      <ExpenseEditDialog
-        expense={editExpense}
-        onClose={() => setEditExpense(null)}
-      />
+      {/* Edit / New Dialog */}
+      {(editExpense || showNew) && (
+        <ExpenseEditDialog
+          expense={editExpense}
+          categories={categories}
+          partners={partners}
+          currentUserProfile={currentUserProfile}
+          onClose={() => {
+            setEditExpense(null);
+            setShowNew(false);
+          }}
+          onSave={loadData}
+        />
+      )}
     </div>
   );
 }
@@ -368,14 +470,20 @@ function ExpenseDetailDialog({
   expense,
   onClose,
   onEdit,
+  onStatusUpdate,
 }: {
-  expense: Partial<Expense> | null;
+  expense: Expense | null;
   onClose: () => void;
   onEdit: () => void;
+  onStatusUpdate: (id: number, status: ReviewStatus) => Promise<void>;
 }) {
   if (!expense) return null;
   const status = getStatusInfo(expense.review_status || "pending");
   const confidence = getConfidenceInfo(expense.ai_confidence ?? null);
+  
+  const partnerName = expense.created_by
+    ? `${expense.created_by.full_name} ${expense.created_by.last_name || ""}`.trim()
+    : expense.whatsapp_sender_name || "Desconocido";
 
   return (
     <Dialog open={!!expense} onOpenChange={() => onClose()}>
@@ -387,72 +495,87 @@ function ExpenseDetailDialog({
             </div>
             <div>
               <span>Gasto #{expense.id}</span>
-              <Badge variant={status.variant} className="ml-3 gap-1.5 text-xs">
+              <Badge variant={status.variant} className="ml-3 gap-1.5 text-xs py-0.5 border">
                 <div className={`w-1.5 h-1.5 rounded-full ${status.dotColor}`} />
                 {status.label}
               </Badge>
             </div>
           </DialogTitle>
           <DialogDescription>
-            Detalle completo del gasto registrado
+            Detalles e información de validación del comprobante
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-6 mt-4">
-          {/* Main data */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <DetailField label="Proveedor" value={expense.supplier_name || "—"} />
             <DetailField label="Monto" value={formatCurrency(expense.total_amount || 0, expense.currency)} highlight />
-            <DetailField label="Fecha del gasto" value={formatDate(expense.expense_date || null)} />
+            <DetailField label="Fecha del comprobante" value={formatDate(expense.expense_date || null)} />
             <DetailField label="Método de pago" value={expense.payment_method?.replace("_", " ") || "—"} />
-            <DetailField label="Categoría" value={expense.category?.name || "—"} />
-            <DetailField label="Socio" value={expense.whatsapp_sender_name || "—"} />
+            <DetailField label="Categoría" value={expense.category?.name || "Otros"} />
+            <DetailField label="Rendido por" value={partnerName} />
           </div>
 
           <Separator />
 
-          {/* Description */}
           <div>
-            <Label className="text-xs text-muted-foreground mb-1 block">Descripción</Label>
-            <p className="text-sm">{expense.description || "Sin descripción"}</p>
+            <Label className="text-xs text-muted-foreground mb-1 block">Descripción del gasto</Label>
+            <p className="text-sm font-medium">{expense.description || "Sin descripción"}</p>
           </div>
 
-          {/* AI Confidence */}
-          <div className="flex items-center gap-4 p-3 rounded-xl bg-muted/50">
+          <div className="flex items-center justify-between gap-4 p-3.5 rounded-2xl bg-muted/40 border border-border/50">
             <div className={`flex items-center gap-2 ${confidence.color}`}>
               {expense.ai_confidence && expense.ai_confidence < 0.7 ? (
                 <AlertTriangle className="w-4 h-4" />
               ) : (
                 <CheckCircle2 className="w-4 h-4" />
               )}
-              <span className="text-sm font-medium">
+              <span className="text-sm font-semibold">
                 Confianza IA: {expense.ai_confidence ? `${Math.round(expense.ai_confidence * 100)}%` : "—"}
               </span>
             </div>
-            <Badge variant="outline" className="text-xs">
+            <Badge variant="outline" className="text-xs border-border bg-background">
               {confidence.label}
             </Badge>
           </div>
 
-          {/* Comprobante placeholder */}
-          <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
-            <FileImage className="w-10 h-10 mx-auto text-muted-foreground/50 mb-2" />
-            <p className="text-sm text-muted-foreground">
-              Comprobante original
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Se mostrará cuando Supabase Storage esté configurado
-            </p>
-          </div>
+          {expense.notes && (
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Notas internas / Auditoría</Label>
+              <p className="text-xs text-amber-600 bg-amber-500/5 p-3 rounded-xl border border-amber-500/10 font-medium">
+                {expense.notes}
+              </p>
+            </div>
+          )}
 
-          {/* Actions */}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={onClose}>
-              Cerrar
-            </Button>
-            <Button onClick={onEdit} className="gap-2">
-              <Pencil className="w-4 h-4" /> Editar
-            </Button>
+          {/* Quick validation footer */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-border/60">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-emerald-500 hover:text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/5"
+                onClick={() => onStatusUpdate(expense.id, "reviewed")}
+              >
+                <CheckCircle2 className="w-4 h-4 mr-1.5" /> Aprobar
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:text-destructive hover:bg-destructive/5"
+                onClick={() => onStatusUpdate(expense.id, "rejected")}
+              >
+                <XCircle className="w-4 h-4 mr-1.5" /> Rechazar
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={onClose}>
+                Cerrar
+              </Button>
+              <Button size="sm" onClick={onEdit} className="gap-2">
+                <Pencil className="w-4 h-4" /> Editar gasto
+              </Button>
+            </div>
           </div>
         </div>
       </DialogContent>
@@ -472,74 +595,184 @@ function DetailField({
   return (
     <div>
       <Label className="text-xs text-muted-foreground mb-0.5 block">{label}</Label>
-      <p className={`text-sm ${highlight ? "text-lg font-bold" : "font-medium"}`}>{value}</p>
+      <p className={`text-sm ${highlight ? "text-base font-bold text-primary" : "font-medium"}`}>{value}</p>
     </div>
   );
 }
 
 // ============================================================
-// Expense Edit Dialog
+// Expense Edit / New Dialog
 // ============================================================
 
 function ExpenseEditDialog({
   expense,
+  categories,
+  partners,
+  currentUserProfile,
   onClose,
+  onSave,
 }: {
   expense: Partial<Expense> | null;
+  categories: ExpenseCategory[];
+  partners: UserProfile[];
+  currentUserProfile: UserProfile | null;
   onClose: () => void;
+  onSave: () => void;
 }) {
-  if (!expense) return null;
+  const supabase = createClient();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Form fields
+  const [expenseDate, setExpenseDate] = useState("");
+  const [totalAmount, setTotalAmount] = useState("");
+  const [supplierName, setSupplierName] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [description, setDescription] = useState("");
+  const [currency, setCurrency] = useState("ARS");
+  const [paymentMethod, setPaymentMethod] = useState("efectivo");
+  const [reviewStatus, setReviewStatus] = useState<ReviewStatus>("pending");
+  const [createdById, setCreatedById] = useState("");
+  const [notes, setNotes] = useState("");
+
+  useEffect(() => {
+    if (expense) {
+      // Editing
+      setExpenseDate(expense.expense_date || "");
+      setTotalAmount(expense.total_amount?.toString() || "");
+      setSupplierName(expense.supplier_name || "");
+      setCategoryId(expense.category_id || "");
+      setDescription(expense.description || "");
+      setCurrency(expense.currency || "ARS");
+      setPaymentMethod(expense.payment_method || "efectivo");
+      setReviewStatus(expense.review_status || "pending");
+      setCreatedById(expense.created_by_profile_id || "");
+      setNotes(expense.notes || "");
+    } else {
+      // New Expense
+      const today = new Date().toISOString().split("T")[0];
+      setExpenseDate(today);
+      setTotalAmount("");
+      setSupplierName("");
+      setCategoryId(categories[0]?.id || "");
+      setDescription("");
+      setCurrency("ARS");
+      setPaymentMethod("efectivo");
+      setReviewStatus("pending");
+      setCreatedById(currentUserProfile?.id || "");
+      setNotes("");
+    }
+  }, [expense, categories, partners, currentUserProfile]);
+
+  async function handleSave() {
+    if (!totalAmount || Number(totalAmount) <= 0) {
+      setError("El monto debe ser mayor a 0");
+      return;
+    }
+
+    if (!currentUserProfile) {
+      setError("No se pudo identificar tu organización");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const payload = {
+        organization_id: currentUserProfile.organization_id,
+        created_by_profile_id: createdById || null,
+        category_id: categoryId || null,
+        expense_date: expenseDate || null,
+        supplier_name: supplierName.trim() || null,
+        total_amount: Number(totalAmount),
+        currency,
+        payment_method: paymentMethod || null,
+        description: description.trim() || null,
+        review_status: reviewStatus,
+        notes: notes.trim() || null,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (expense?.id) {
+        // Update
+        const { error } = await supabase
+          .from("expenses")
+          .update(payload)
+          .eq("id", expense.id);
+
+        if (error) throw error;
+      } else {
+        // Insert new
+        const { error } = await supabase
+          .from("expenses")
+          .insert({
+            ...payload,
+            ai_status: "processed",
+            ai_confidence: 1.0, // Manual receipts have 100% confidence
+          });
+
+        if (error) throw error;
+      }
+
+      onSave();
+      onClose();
+    } catch (err: any) {
+      console.error("Error saving expense:", err);
+      setError(err.message || "Error al guardar el gasto");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
-    <Dialog open={!!expense} onOpenChange={() => onClose()}>
-      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+    <Dialog open={true} onOpenChange={() => onClose()}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Editar Gasto #{expense.id}</DialogTitle>
+          <DialogTitle>{expense?.id ? `Editar Gasto #${expense.id}` : "Nuevo Gasto Manual"}</DialogTitle>
           <DialogDescription>
-            Corregí los datos del gasto. Los cambios quedan registrados en auditoría.
+            {expense?.id
+              ? "Actualizá la información del comprobante"
+              : "Registrá un gasto directamente en el sistema"}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 mt-4">
+        {error && (
+          <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <div className="space-y-4 py-2">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label className="text-xs">Fecha del gasto</Label>
-              <Input type="date" defaultValue={expense.expense_date || ""} className="mt-1 h-9" />
+              <Input
+                type="date"
+                value={expenseDate}
+                onChange={(e) => setExpenseDate(e.target.value)}
+                className="mt-1 h-9"
+              />
             </div>
             <div>
-              <Label className="text-xs">Monto total</Label>
-              <Input type="number" step="0.01" defaultValue={expense.total_amount || 0} className="mt-1 h-9" />
+              <Label className="text-xs">Monto total *</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={totalAmount}
+                onChange={(e) => setTotalAmount(e.target.value)}
+                className="mt-1 h-9"
+                placeholder="0.00"
+                required
+              />
             </div>
-          </div>
-
-          <div>
-            <Label className="text-xs">Proveedor</Label>
-            <Input defaultValue={expense.supplier_name || ""} className="mt-1 h-9" />
-          </div>
-
-          <div>
-            <Label className="text-xs">Categoría</Label>
-            <Select defaultValue={expense.category?.name}>
-              <SelectTrigger className="mt-1 h-9">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {categories.map((c) => (
-                  <SelectItem key={c} value={c}>{c}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label className="text-xs">Descripción</Label>
-            <Textarea defaultValue={expense.description || ""} className="mt-1" rows={2} />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label className="text-xs">Moneda</Label>
-              <Select defaultValue={expense.currency || "ARS"}>
+              <Select value={currency} onValueChange={(val) => setCurrency(val || "ARS")}>
                 <SelectTrigger className="mt-1 h-9">
                   <SelectValue />
                 </SelectTrigger>
@@ -551,7 +784,7 @@ function ExpenseEditDialog({
             </div>
             <div>
               <Label className="text-xs">Método de pago</Label>
-              <Select defaultValue={expense.payment_method || ""}>
+              <Select value={paymentMethod} onValueChange={(val) => setPaymentMethod(val || "efectivo")}>
                 <SelectTrigger className="mt-1 h-9">
                   <SelectValue />
                 </SelectTrigger>
@@ -568,8 +801,62 @@ function ExpenseEditDialog({
           </div>
 
           <div>
+            <Label className="text-xs">Proveedor</Label>
+            <Input
+              value={supplierName}
+              onChange={(e) => setSupplierName(e.target.value)}
+              className="mt-1 h-9"
+              placeholder="Ej: Easy, Carrefour"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label className="text-xs">Categoría</Label>
+              <Select value={categoryId} onValueChange={(val) => setCategoryId(val || "")}>
+                <SelectTrigger className="mt-1 h-9">
+                  <SelectValue placeholder="Otros" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                  <SelectItem value="">Otros</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label className="text-xs">Socio Responsable</Label>
+              <Select value={createdById} onValueChange={(val) => setCreatedById(val || "")}>
+                <SelectTrigger className="mt-1 h-9">
+                  <SelectValue placeholder="Seleccionar socio" />
+                </SelectTrigger>
+                <SelectContent>
+                  {partners.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.full_name} {p.last_name || ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-xs">Descripción</Label>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="mt-1"
+              rows={2}
+              placeholder="Detalles sobre lo que se compró..."
+            />
+          </div>
+
+          <div>
             <Label className="text-xs">Estado de revisión</Label>
-            <Select defaultValue={expense.review_status || "pending"}>
+            <Select value={reviewStatus} onValueChange={(val) => setReviewStatus((val as ReviewStatus) || "pending")}>
               <SelectTrigger className="mt-1 h-9">
                 <SelectValue />
               </SelectTrigger>
@@ -583,18 +870,35 @@ function ExpenseEditDialog({
           </div>
 
           <div>
-            <Label className="text-xs">Notas internas</Label>
-            <Textarea defaultValue={expense.notes || ""} className="mt-1" rows={2} placeholder="Notas adicionales..." />
+            <Label className="text-xs">Notas internas / Observaciones</Label>
+            <Textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="mt-1"
+              rows={2}
+              placeholder="Notas de auditoría o correcciones..."
+            />
           </div>
 
           <Separator />
 
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={onClose}>
+            <Button variant="outline" type="button" disabled={loading} onClick={onClose}>
               Cancelar
             </Button>
-            <Button className="shadow-md shadow-primary/20" onClick={onClose}>
-              Guardar cambios
+            <Button
+              type="button"
+              disabled={loading}
+              onClick={handleSave}
+              className="shadow-md shadow-primary/20 bg-primary hover:bg-primary/90"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> Guardando...
+                </>
+              ) : (
+                "Guardar cambios"
+              )}
             </Button>
           </div>
         </div>
