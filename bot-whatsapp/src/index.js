@@ -152,17 +152,31 @@ async function checkPendingCommands(client) {
   }
 }
 
+async function getMessageSender(client, message) {
+  if (message.fromMe) {
+    const selfId = client.info?.wid?._serialized || client.info?.wid?.user || "";
+    return {
+      phone: normalizePhone(selfId),
+      name: client.info?.pushname || "Cuenta vinculada",
+    };
+  }
+
+  const contact = await message.getContact();
+  const senderId = message.author || contact.id?._serialized || "";
+
+  return {
+    phone: getContactPhone(contact, senderId),
+    name: contact.pushname || contact.name || contact.shortName || "Desconocido",
+  };
+}
+
 async function handleMessage(client, message) {
   try {
     const chat = await message.getChat();
     if (!chat.isGroup) return;
 
-    const contact = await message.getContact();
     const messageText = message.body || "";
-    const senderId = message.author || contact.id?._serialized || "";
-    const senderPhone = getContactPhone(contact, senderId);
-    const senderName =
-      contact.pushname || contact.name || contact.shortName || "Desconocido";
+    const { phone: senderPhone, name: senderName } = await getMessageSender(client, message);
 
     const isCommand =
       messageText.startsWith("/gastos") || messageText.startsWith("/gasto");
