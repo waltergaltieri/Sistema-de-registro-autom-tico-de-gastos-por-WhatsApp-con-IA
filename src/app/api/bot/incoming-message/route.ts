@@ -5,6 +5,7 @@ import {
   buildStorageUploadFailureReply,
   getOrganizationFileHashFilters,
 } from "@/lib/incoming-expense";
+import { resolveExpenseCategoryId } from "@/lib/expense-category";
 import crypto from "crypto";
 
 export async function POST(request: NextRequest) {
@@ -173,7 +174,7 @@ export async function POST(request: NextRequest) {
     // 10. Get categories for AI context
     const { data: categories } = await supabase
       .from("expense_categories")
-      .select("name")
+      .select("id, name")
       .eq("organization_id", org.id)
       .eq("is_active", true);
 
@@ -204,22 +205,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 12. Match category
-    let categoryId: string | null = null;
-    if (aiResult.suggested_category_name && categories) {
-      const match = categories.find(
-        (c) => c.name.toLowerCase() === aiResult.suggested_category_name?.toLowerCase()
-      );
-      if (match) {
-        const { data: catWithId } = await supabase
-          .from("expense_categories")
-          .select("id")
-          .eq("organization_id", org.id)
-          .eq("name", match.name)
-          .single();
-        categoryId = catWithId?.id || null;
-      }
-    }
+    // 12. Match category. Unknown receipts fall back to the explicit "Otros" category.
+    const categoryId = resolveExpenseCategoryId(
+      categories || [],
+      aiResult.suggested_category_name
+    );
 
     // 13. Determine review status
     const reviewStatus = "pending";
