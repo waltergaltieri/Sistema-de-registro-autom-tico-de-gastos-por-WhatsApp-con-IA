@@ -88,6 +88,7 @@ export default function GruposPage() {
   const [linkedGroup, setLinkedGroup] = useState<WhatsAppGroup | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
+  const [syncingGroups, setSyncingGroups] = useState(false);
 
   // Test Message Command
   const [testState, setTestState] = useState<"idle" | "queuing" | "polling" | "delivered" | "failed">("idle");
@@ -323,6 +324,72 @@ export default function GruposPage() {
       alert("Hubo un error al vincular el grupo.");
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const requestGroupSync = async () => {
+    setSyncingGroups(true);
+    setSearchFeedback({
+      type: "success",
+      message: "Sincronizacion solicitada. El bot esta leyendo tus grupos de WhatsApp...",
+    });
+
+    try {
+      const response = await fetch("/api/bot/commands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "queue",
+          command: "sync_groups",
+          payload: {},
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok || !result.ok || !result.command?.id) {
+        throw new Error(result.error || "No se pudo solicitar la sincronizacion.");
+      }
+
+      const commandId = result.command.id;
+      const startedAt = Date.now();
+
+      while (Date.now() - startedAt < 30000) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+
+        const { data: command, error } = await supabase
+          .from("bot_commands")
+          .select("status, error_message")
+          .eq("id", commandId)
+          .single();
+
+        if (error) throw error;
+
+        if (command.status === "completed") {
+          setSearchFeedback({
+            type: "success",
+            message:
+              "Grupos sincronizados. Ahora busca el nombre del grupo nuevamente.",
+          });
+          return;
+        }
+
+        if (command.status === "failed") {
+          throw new Error(command.error_message || "El bot no pudo sincronizar los grupos.");
+        }
+      }
+
+      setSearchFeedback({
+        type: "success",
+        message:
+          "La sincronizacion quedo en proceso. Espera unos segundos y vuelve a buscar el grupo.",
+      });
+    } catch (err) {
+      setSearchFeedback({
+        type: "error",
+        message: getErrorMessage(err, "No se pudo sincronizar la lista de grupos."),
+      });
+    } finally {
+      setSyncingGroups(false);
     }
   };
 
@@ -727,7 +794,7 @@ export default function GruposPage() {
                     <Label htmlFor="group-name" className="text-sm font-semibold">
                       Nombre del Grupo en WhatsApp
                     </Label>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <div className="relative flex-1">
                         <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                         <Input
@@ -737,12 +804,26 @@ export default function GruposPage() {
                           value={searchName}
                           onChange={(e) => setSearchName(e.target.value)}
                           className="pl-9 bg-card/50"
-                          disabled={searchingGroup || actionLoading}
+                          disabled={searchingGroup || actionLoading || syncingGroups}
                         />
                       </div>
                       <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={requestGroupSync}
+                        disabled={syncingGroups || actionLoading || botStatus !== "conectado"}
+                        className="gap-2 font-medium shrink-0"
+                      >
+                        {syncingGroups ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-4 h-4" />
+                        )}
+                        Actualizar grupos
+                      </Button>
+                      <Button
                         type="submit"
-                        disabled={searchingGroup || actionLoading || !searchName.trim()}
+                        disabled={searchingGroup || actionLoading || syncingGroups || !searchName.trim()}
                         className="bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20 gap-2 font-medium shrink-0"
                       >
                         {searchingGroup ? (

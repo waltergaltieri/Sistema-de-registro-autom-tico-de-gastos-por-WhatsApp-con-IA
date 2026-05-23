@@ -104,6 +104,16 @@ async function checkPendingCommands(client) {
           continue;
         }
 
+        if (cmd.command === "sync_groups") {
+          await syncGroups(client);
+          await sendToBackend("/api/bot/commands", {
+            action: "resolve",
+            command_id: cmd.id,
+            status: "completed",
+          });
+          continue;
+        }
+
         if (cmd.command === "logout_whatsapp") {
           await sendToBackend("/api/bot/commands", {
             action: "resolve",

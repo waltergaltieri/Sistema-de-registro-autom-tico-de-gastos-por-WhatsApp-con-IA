@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { isSupportedBotCommand } from "@/lib/bot-commands";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +107,10 @@ export async function POST(request: NextRequest) {
       const { command, payload } = body;
       if (!command || !payload) {
         return NextResponse.json({ ok: false, error: "Missing command or payload" }, { status: 400 });
+      }
+
+      if (!isSupportedBotCommand(command)) {
+        return NextResponse.json({ ok: false, error: "Unsupported command" }, { status: 400 });
       }
 
       const serviceSupabase = await createServiceClient();

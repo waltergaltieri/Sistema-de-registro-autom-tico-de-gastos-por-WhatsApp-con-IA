@@ -5,7 +5,7 @@ import Link from "next/link";
 import { getBotLinkingView } from "@/lib/bot-status";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, CheckCircle2, QrCode, Smartphone, RefreshCw, PowerOff, ArrowLeft } from "lucide-react";
+import { Loader2, CheckCircle2, QrCode, Smartphone, RefreshCw, PowerOff, ArrowLeft, LayoutDashboard } from "lucide-react";
 
 export default function VincularPage() {
   const [status, setStatus] = useState<string>("desconectado");
@@ -186,14 +186,24 @@ export default function VincularPage() {
                     <div className="w-full bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 p-4 rounded-xl text-sm font-medium">
                       Conexión activa y configurada correctamente.
                     </div>
-                    <Button
-                      variant="secondary"
-                      render={<Link href="/dashboard/grupos" />}
-                      className="gap-2"
-                    >
-                      <ArrowLeft className="w-4 h-4" />
-                      Volver a grupos
-                    </Button>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <Button
+                        variant="secondary"
+                        render={<Link href="/dashboard" />}
+                        className="gap-2"
+                      >
+                        <LayoutDashboard className="w-4 h-4" />
+                        Ir al dashboard
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        render={<Link href="/dashboard/grupos" />}
+                        className="gap-2"
+                      >
+                        <ArrowLeft className="w-4 h-4" />
+                        Volver a grupos
+                      </Button>
+                    </div>
                   </div>
                 )}
               </>
