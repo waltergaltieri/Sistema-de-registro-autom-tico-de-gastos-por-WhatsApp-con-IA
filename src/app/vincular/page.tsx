@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { getBotLinkingView } from "@/lib/bot-status";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, CheckCircle2, QrCode, Smartphone, RefreshCw } from "lucide-react";
+import { Loader2, CheckCircle2, QrCode, Smartphone, RefreshCw, PowerOff, ArrowLeft } from "lucide-react";
 
 export default function VincularPage() {
   const [status, setStatus] = useState<string>("desconectado");
@@ -10,10 +13,9 @@ export default function VincularPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const linkingView = getBotLinkingView(status, qrCode);
 
   useEffect(() => {
-    let intervalId: NodeJS.Timeout;
-
     const fetchStatus = async () => {
       try {
         const res = await fetch("/api/bot/status");
@@ -41,7 +43,7 @@ export default function VincularPage() {
     fetchStatus();
 
     // Poll every 3 seconds
-    intervalId = setInterval(fetchStatus, 3000);
+    const intervalId = setInterval(fetchStatus, 3000);
 
     return () => {
       if (intervalId) clearInterval(intervalId);
@@ -76,6 +78,10 @@ export default function VincularPage() {
               <div className="mx-auto mb-4 flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 text-primary">
                 <QrCode className="w-8 h-8" />
               </div>
+            ) : status === "desconectado" ? (
+              <div className="mx-auto mb-4 flex items-center justify-center w-16 h-16 rounded-full bg-destructive/10 text-destructive">
+                <PowerOff className="w-8 h-8" />
+              </div>
             ) : (
               <div className="mx-auto mb-4 flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 text-primary animate-spin">
                 <Loader2 className="w-8 h-8" />
@@ -83,16 +89,11 @@ export default function VincularPage() {
             )}
 
             <CardTitle className="text-xl">
-              {status === "conectado" && "¡Dispositivo Vinculado!"}
-              {status === "esperando_vinculacion" && (qrCode ? "Escaneá el código QR" : "Generando QR...")}
-              {status === "desconectado" && "Iniciando servicio..."}
+              {linkingView.title}
             </CardTitle>
             
             <CardDescription className="text-sm px-2">
-              {status === "conectado" && "Listo, gracias, ya puedes cerrar esta pestaña."}
-              {status === "esperando_vinculacion" && qrCode && "Abrí WhatsApp en tu celular, ve a Dispositivos vinculados y escaneá este código."}
-              {status === "esperando_vinculacion" && !qrCode && "Esperando que el bot genere un nuevo código de vinculación..."}
-              {status === "desconectado" && "Conectando con el servidor de WhatsApp. Esto puede demorar unos segundos..."}
+              {linkingView.description}
             </CardDescription>
           </CardHeader>
 
@@ -111,11 +112,41 @@ export default function VincularPage() {
             ) : (
               <>
                 {status === "desconectado" && (
-                  <div className="flex flex-col items-center gap-4 py-8 text-center">
-                    <Loader2 className="h-12 w-12 animate-spin text-primary/70" />
-                    <p className="text-sm text-muted-foreground max-w-[280px]">
-                      Asegúrate de que el proceso del bot de WhatsApp esté en ejecución en el servidor.
-                    </p>
+                  <div className="flex flex-col items-center gap-5 py-6 text-center">
+                    <div className="w-full rounded-xl border border-destructive/20 bg-destructive/5 p-4 text-left">
+                      <p className="text-sm font-medium text-destructive">
+                        No hay un proceso de WhatsApp activo generando el QR.
+                      </p>
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Vercel aloja la app web, pero el bot de WhatsApp necesita correr como proceso persistente en un servidor, Render, Railway, Fly.io o una PC encendida.
+                      </p>
+                      <code className="mt-3 block rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+                        cd bot-whatsapp && npm start
+                      </code>
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => window.location.reload()}
+                        className="gap-2"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        Reintentar
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        render={<Link href="/dashboard/grupos" />}
+                        className="gap-2"
+                      >
+                        <ArrowLeft className="w-4 h-4" />
+                        Volver a grupos
+                      </Button>
+                    </div>
+                    {lastUpdated && (
+                      <p className="text-xs text-muted-foreground">
+                        Último estado recibido: {new Date(lastUpdated).toLocaleString("es-AR")}
+                      </p>
+                    )}
                   </div>
                 )}
 
@@ -136,7 +167,7 @@ export default function VincularPage() {
                     ) : (
                       <div className="flex flex-col items-center gap-2 py-16">
                         <Loader2 className="h-10 w-10 animate-spin text-primary" />
-                        <span className="text-sm text-muted-foreground">Obteniendo código...</span>
+                        <span className="text-sm text-muted-foreground">{linkingView.description}</span>
                       </div>
                     )}
 
@@ -155,6 +186,14 @@ export default function VincularPage() {
                     <div className="w-full bg-green-500/10 border border-green-500/20 text-green-600 dark:text-green-400 p-4 rounded-xl text-sm font-medium">
                       Conexión activa y configurada correctamente.
                     </div>
+                    <Button
+                      variant="secondary"
+                      render={<Link href="/dashboard/grupos" />}
+                      className="gap-2"
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                      Volver a grupos
+                    </Button>
                   </div>
                 )}
               </>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getBotConnectionView } from "./bot-status";
+import { getBotConnectionView, getBotLinkingView } from "./bot-status";
 
 describe("getBotConnectionView", () => {
   it("marks a connected bot as ready", () => {
@@ -28,6 +28,28 @@ describe("getBotConnectionView", () => {
     expect(getBotConnectionView("otro")).toMatchObject({
       tone: "danger",
       label: "Desconectado",
+    });
+  });
+});
+
+describe("getBotLinkingView", () => {
+  it("does not present disconnected as a loading state", () => {
+    expect(getBotLinkingView("desconectado", null)).toMatchObject({
+      isWaiting: false,
+      title: "Bot de WhatsApp apagado",
+      description: "El QR aparece cuando el proceso bot-whatsapp esta corriendo.",
+    });
+  });
+
+  it("shows QR scan instructions only when the QR is available", () => {
+    expect(getBotLinkingView("esperando_vinculacion", "data:image/png;base64,abc")).toMatchObject({
+      isWaiting: false,
+      title: "Escanea el codigo QR",
+    });
+
+    expect(getBotLinkingView("esperando_vinculacion", null)).toMatchObject({
+      isWaiting: true,
+      title: "Esperando codigo QR",
     });
   });
 });
