@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const QRCode = require("qrcode");
 const { Client, LocalAuth } = require("whatsapp-web.js");
+const { getContactPhone, normalizePhone } = require("./phone");
 
 const API_URL = process.env.PROCESSING_API_URL;
 const WEBHOOK_SECRET = process.env.BOT_WEBHOOK_SECRET;
@@ -12,10 +13,6 @@ const SESSION_ID = process.env.OPENWA_SESSION_ID || "gastos-socios";
 if (!API_URL || !WEBHOOK_SECRET) {
   console.error("Faltan PROCESSING_API_URL o BOT_WEBHOOK_SECRET en .env");
   process.exit(1);
-}
-
-function normalizePhone(id) {
-  return (id || "").replace("@c.us", "").replace("@lid", "");
 }
 
 function getParticipantId(participant) {
@@ -153,6 +150,7 @@ async function handleMessage(client, message) {
     const contact = await message.getContact();
     const messageText = message.body || "";
     const senderId = message.author || contact.id?._serialized || "";
+    const senderPhone = getContactPhone(contact, senderId);
     const senderName =
       contact.pushname || contact.name || contact.shortName || "Desconocido";
 
@@ -163,7 +161,7 @@ async function handleMessage(client, message) {
       console.log(`Comando recibido de ${senderName}: ${messageText}`);
       const response = await sendToBackend("/api/bot/query", {
         chat_id: chat.id._serialized,
-        sender_phone: normalizePhone(senderId),
+        sender_phone: senderPhone,
         sender_name: senderName,
         message_text: messageText,
       });
@@ -213,7 +211,7 @@ async function handleMessage(client, message) {
     const response = await sendToBackend("/api/bot/incoming-message", {
       message_id: message.id._serialized,
       chat_id: chat.id._serialized,
-      sender_phone: normalizePhone(senderId),
+      sender_phone: senderPhone,
       sender_name: senderName,
       message_text: messageText,
       sent_at: new Date(message.timestamp * 1000).toISOString(),
