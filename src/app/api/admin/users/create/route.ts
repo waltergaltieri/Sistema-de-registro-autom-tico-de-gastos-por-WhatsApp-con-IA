@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { canMergeDuplicatePhoneProfile } from "@/lib/user-profile-merge";
 
 export async function POST(request: NextRequest) {
   try {
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
       // Fetch current profile to check if it already has auth_user_id
       const { data: existingProfile } = await supabaseAdmin
         .from("users_profile")
-        .select("auth_user_id, email")
+        .select("auth_user_id, email, organization_id")
         .eq("id", profileId)
         .single();
 
@@ -67,6 +68,54 @@ export async function POST(request: NextRequest) {
       }
 
       authUserId = existingProfile.auth_user_id;
+
+      const { data: duplicatePhoneProfile, error: duplicatePhoneError } =
+        await supabaseAdmin
+          .from("users_profile")
+          .select("id, auth_user_id, role")
+          .eq("organization_id", existingProfile.organization_id)
+          .eq("whatsapp_phone", whatsapp_phone)
+          .neq("id", profileId)
+          .maybeSingle();
+
+      if (duplicatePhoneError) {
+        console.error("Error checking duplicate phone profile:", duplicatePhoneError);
+        return NextResponse.json({ ok: false, error: "Error validando duplicados de WhatsApp" }, { status: 500 });
+      }
+
+      if (duplicatePhoneProfile) {
+        if (
+          !canMergeDuplicatePhoneProfile({
+            authUserId: duplicatePhoneProfile.auth_user_id,
+            role: duplicatePhoneProfile.role,
+          })
+        ) {
+          return NextResponse.json(
+            { ok: false, error: "Ya existe otro socio con este número de WhatsApp" },
+            { status: 400 }
+          );
+        }
+
+        const { error: moveExpensesError } = await supabaseAdmin
+          .from("expenses")
+          .update({ created_by_profile_id: profileId })
+          .eq("created_by_profile_id", duplicatePhoneProfile.id);
+
+        if (moveExpensesError) {
+          console.error("Error moving duplicate profile expenses:", moveExpensesError);
+          return NextResponse.json({ ok: false, error: "Error fusionando gastos del perfil duplicado" }, { status: 500 });
+        }
+
+        const { error: deleteDuplicateError } = await supabaseAdmin
+          .from("users_profile")
+          .delete()
+          .eq("id", duplicatePhoneProfile.id);
+
+        if (deleteDuplicateError) {
+          console.error("Error deleting duplicate phone profile:", deleteDuplicateError);
+          return NextResponse.json({ ok: false, error: "Error eliminando perfil duplicado" }, { status: 500 });
+        }
+      }
 
       // Handle credentials creation or update
       if (password && email) {
