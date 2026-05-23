@@ -103,7 +103,7 @@ Información del mensaje de WhatsApp:
 Extraé todos los datos que puedas del comprobante.`;
 }
 
-function getResponseSchema() {
+export function getResponseSchema() {
   return {
     type: "OBJECT",
     properties: {
@@ -113,7 +113,7 @@ function getResponseSchema() {
       receipt_type: { type: "STRING", nullable: true },
       receipt_number: { type: "STRING", nullable: true },
       description: { type: "STRING" },
-      total_amount: { type: "NUMBER" },
+      total_amount: { type: "NUMBER", nullable: true },
       currency: { type: "STRING", nullable: true },
       payment_method: { type: "STRING", nullable: true },
       suggested_category_name: { type: "STRING", nullable: true },
@@ -148,13 +148,13 @@ function getResponseSchema() {
   };
 }
 
-function normalizeGeminiResponse(
+export function normalizeGeminiResponse(
   raw: GeminiExpenseResponse
 ): GeminiExpenseResponse {
   return {
     ...raw,
     // Normalize amount
-    total_amount: typeof raw.total_amount === "number" ? Math.abs(raw.total_amount) : 0,
+    total_amount: typeof raw.total_amount === "number" ? Math.abs(raw.total_amount) : null,
     // Normalize confidence
     confidence:
       typeof raw.confidence === "number"

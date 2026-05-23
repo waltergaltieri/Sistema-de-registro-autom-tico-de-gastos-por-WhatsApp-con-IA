@@ -157,7 +157,7 @@ export interface GeminiExpenseResponse {
   receipt_type: string | null;
   receipt_number: string | null;
   description: string;
-  total_amount: number;
+  total_amount: number | null;
   currency: string | null;
   payment_method: string | null;
   suggested_category_name: string | null;

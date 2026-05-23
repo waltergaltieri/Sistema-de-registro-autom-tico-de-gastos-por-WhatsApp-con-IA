@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { processExpenseWithGemini } from "@/lib/gemini";
+import {
+  buildStorageUploadFailureReply,
+  getOrganizationFileHashFilters,
+} from "@/lib/incoming-expense";
 import crypto from "crypto";
 
 export async function POST(request: NextRequest) {
@@ -91,11 +95,15 @@ export async function POST(request: NextRequest) {
     const storagePath = `${org.id}/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${message_id}/original.${ext}`;
 
     // Check for duplicate by hash
-    const { data: hashDuplicate } = await supabase
+    let hashDuplicateQuery = supabase
       .from("expense_files")
-      .select("expense_id")
-      .eq("file_sha256", fileHash)
-      .single();
+      .select("expense_id");
+
+    for (const [field, value] of getOrganizationFileHashFilters(org.id, fileHash)) {
+      hashDuplicateQuery = hashDuplicateQuery.eq(field, value);
+    }
+
+    const { data: hashDuplicate } = await hashDuplicateQuery.single();
 
     if (hashDuplicate) {
       return NextResponse.json({
@@ -113,6 +121,15 @@ export async function POST(request: NextRequest) {
 
     if (uploadError) {
       console.error("Storage upload error:", uploadError);
+      await supabase
+        .from("bot_message_logs")
+        .update({
+          processing_status: "failed",
+          error_message: "Storage upload failed",
+        })
+        .eq("whatsapp_message_id", message_id);
+
+      return NextResponse.json(buildStorageUploadFailureReply(), { status: 500 });
     }
 
     // 8. Create preliminary expense record
@@ -205,7 +222,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 13. Determine review status
-    let reviewStatus = "pending";
+    const reviewStatus = "pending";
     let aiStatus = "processed";
     if (aiResult.confidence < 0.5 || !aiResult.total_amount) {
       aiStatus = "needs_review";
