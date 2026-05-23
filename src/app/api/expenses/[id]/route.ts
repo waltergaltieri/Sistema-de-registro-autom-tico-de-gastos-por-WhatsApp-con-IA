@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { buildExpenseUpdates, parsePositiveIntegerParam } from "@/lib/expenses";
 
 export async function GET(
   request: NextRequest,
@@ -13,6 +14,10 @@ export async function GET(
     }
 
     const { id } = await params;
+    const expenseId = parsePositiveIntegerParam(id, 0);
+    if (expenseId === 0) {
+      return NextResponse.json({ error: "Invalid expense id" }, { status: 400 });
+    }
 
     const { data, error } = await supabase
       .from("expenses")
@@ -23,7 +28,7 @@ export async function GET(
         expense_files(*),
         expense_audit_logs(*, users_profile!actor_profile_id(id, full_name))
       `)
-      .eq("id", parseInt(id))
+      .eq("id", expenseId)
       .single();
 
     if (error) {
@@ -48,7 +53,10 @@ export async function PATCH(
     }
 
     const { id } = await params;
-    const expenseId = parseInt(id);
+    const expenseId = parsePositiveIntegerParam(id, 0);
+    if (expenseId === 0) {
+      return NextResponse.json({ error: "Invalid expense id" }, { status: 400 });
+    }
     const body = await request.json();
 
     // Get current expense data for audit
@@ -69,31 +77,11 @@ export async function PATCH(
       .eq("auth_user_id", user.id)
       .single();
 
-    // Allowed fields for update
-    const allowedFields = [
-      "expense_date", "supplier_name", "supplier_tax_id", "receipt_type",
-      "receipt_number", "description", "total_amount", "currency",
-      "payment_method", "category_id", "review_status", "notes",
-      "created_by_profile_id",
-    ];
-
-    const updates: Record<string, unknown> = {};
-    for (const field of allowedFields) {
-      if (body[field] !== undefined) {
-        updates[field] = body[field];
-      }
-    }
-
-    if (Object.keys(updates).length === 0) {
+    let updates: Record<string, unknown>;
+    try {
+      updates = buildExpenseUpdates(body, currentExpense.review_status);
+    } catch {
       return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
-    }
-
-    // If status changes to corrected
-    if (updates.review_status && updates.review_status !== currentExpense.review_status) {
-      // Auto-set to 'corrected' if other fields also changed
-      if (Object.keys(updates).length > 1 && updates.review_status === undefined) {
-        updates.review_status = "corrected";
-      }
     }
 
     // Update expense

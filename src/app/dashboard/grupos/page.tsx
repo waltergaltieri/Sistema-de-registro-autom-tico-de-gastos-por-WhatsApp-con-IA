@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { getBotConnectionView } from "@/lib/bot-status";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -29,6 +30,7 @@ import {
   X,
   Search,
   RefreshCw,
+  ExternalLink,
 } from "lucide-react";
 
 interface WhatsAppGroup {
@@ -61,6 +63,10 @@ const PRESET_COLORS = [
   "#84cc16", // Lime
 ];
 
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export default function GruposPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -88,6 +94,23 @@ export default function GruposPage() {
   const [pendingCommandId, setPendingCommandId] = useState<string | null>(null);
   const [testError, setTestError] = useState("");
   const [userConfirmed, setUserConfirmed] = useState<boolean | null>(null);
+  const botConnectionView = getBotConnectionView(botStatus);
+
+  const fetchBotStatus = useCallback(async (showLoader = true) => {
+    if (showLoader) setRefreshingStatus(true);
+    try {
+      const res = await fetch("/api/bot/status");
+      const data = await res.json();
+      if (data.ok) {
+        setBotStatus(data.status);
+        setBotQrCode(data.qr_code);
+      }
+    } catch (err) {
+      console.error("Error fetching bot status:", err);
+    } finally {
+      if (showLoader) setRefreshingStatus(false);
+    }
+  }, []);
 
   // Load initial data
   useEffect(() => {
@@ -146,7 +169,7 @@ export default function GruposPage() {
     }
 
     loadData();
-  }, [supabase, router]);
+  }, [supabase, router, fetchBotStatus]);
 
   // Poll Bot Status while waiting for connection or QR
   useEffect(() => {
@@ -162,7 +185,7 @@ export default function GruposPage() {
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [botStatus]);
+  }, [botStatus, fetchBotStatus]);
 
   // Poll Test Command status
   useEffect(() => {
@@ -197,34 +220,6 @@ export default function GruposPage() {
       if (commandIntervalId) clearInterval(commandIntervalId);
     };
   }, [testState, pendingCommandId, supabase]);
-
-  const fetchBotStatus = async (showLoader = true) => {
-    if (showLoader) setRefreshingStatus(true);
-    try {
-      const res = await fetch("/api/bot/status");
-      const data = await res.json();
-      if (data.ok) {
-        setBotStatus(data.status);
-        setBotQrCode(data.qr_code);
-        
-        // If status changed to conectado, refresh the linked group JID details
-        if (data.status === "conectado" && org?.whatsapp_group_id && !linkedGroup) {
-          const { data: groupData } = await supabase
-            .from("whatsapp_groups")
-            .select("*")
-            .eq("id", org.whatsapp_group_id)
-            .maybeSingle();
-          if (groupData) {
-            setLinkedGroup(groupData);
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Error fetching bot status:", err);
-    } finally {
-      if (showLoader) setRefreshingStatus(false);
-    }
-  };
 
   const handleSearchAndLink = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -404,9 +399,9 @@ export default function GruposPage() {
       } else {
         throw new Error(data.error || "No se pudo encolar el comando de cierre de sesión.");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error logging out WhatsApp:", err);
-      alert(err.message || "Error al intentar cerrar la sesión.");
+      alert(getErrorMessage(err, "Error al intentar cerrar la sesión."));
       setLogoutLoading(false);
     }
   };
@@ -438,10 +433,10 @@ export default function GruposPage() {
       } else {
         throw new Error(data.error || "No se pudo encolar el comando.");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error sending test message:", err);
       setTestState("failed");
-      setTestError(err.message || "Error de red al enviar el mensaje de prueba.");
+      setTestError(getErrorMessage(err, "Error de red al enviar el mensaje de prueba."));
     }
   };
 
@@ -482,16 +477,27 @@ export default function GruposPage() {
             Conecta tu cuenta de WhatsApp y configura el grupo del cual recopilar gastos automáticamente.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => fetchBotStatus(true)}
-          disabled={refreshingStatus}
-          className="self-start md:self-auto gap-2 backdrop-blur-sm bg-card/50 hover:bg-card border-border/80"
-        >
-          <RefreshCw className={`w-4 h-4 ${refreshingStatus ? "animate-spin" : ""}`} />
-          Actualizar Estado
-        </Button>
+        <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+          <Button
+            size="sm"
+            render={<Link href="/vincular" target="_blank" />}
+            className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shadow-indigo-600/20"
+          >
+            <QrCode className="w-4 h-4" />
+            {botConnectionView.actionLabel}
+            <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchBotStatus(true)}
+            disabled={refreshingStatus}
+            className="gap-2 backdrop-blur-sm bg-card/50 hover:bg-card border-border/80"
+          >
+            <RefreshCw className={`w-4 h-4 ${refreshingStatus ? "animate-spin" : ""}`} />
+            Actualizar estado
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-8">
@@ -506,27 +512,27 @@ export default function GruposPage() {
                 </span>
                 <CardTitle className="text-lg font-bold flex items-center gap-2">
                   <Bot className="w-5 h-5 text-indigo-500" />
-                  Vincular WhatsApp del Bot
+                  {botConnectionView.title}
                 </CardTitle>
                 <CardDescription>
-                  Escanea el código QR para conectar la sesión de WhatsApp del bot.
+                  {botConnectionView.description}
                 </CardDescription>
               </div>
               <div>
                 {botStatus === "conectado" ? (
                   <Badge className="bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 gap-1.5 px-3 py-1 text-xs">
                     <Wifi className="w-3.5 h-3.5" />
-                    En Línea
+                    {botConnectionView.label}
                   </Badge>
                 ) : botStatus === "esperando_vinculacion" ? (
                   <Badge className="bg-amber-500/15 text-amber-500 border border-amber-500/30 gap-1.5 px-3 py-1 text-xs animate-pulse">
                     <QrCode className="w-3.5 h-3.5" />
-                    Esperando QR
+                    {botConnectionView.label}
                   </Badge>
                 ) : (
                   <Badge className="bg-destructive/15 text-destructive border border-destructive/30 gap-1.5 px-3 py-1 text-xs">
                     <WifiOff className="w-3.5 h-3.5" />
-                    Desconectado
+                    {botConnectionView.label}
                   </Badge>
                 )}
               </div>
@@ -546,20 +552,32 @@ export default function GruposPage() {
                     </p>
                   </div>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleLogoutWhatsApp}
-                  disabled={actionLoading || logoutLoading}
-                  className="border-destructive/30 text-destructive hover:bg-destructive/10 gap-2 shrink-0 self-start md:self-center"
-                >
-                  {logoutLoading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Link2Off className="w-4 h-4" />
-                  )}
-                  Cerrar Sesión de WhatsApp
-                </Button>
+                <div className="flex flex-wrap gap-2 shrink-0 self-start md:self-center">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    render={<Link href="/vincular" target="_blank" />}
+                    className="gap-2"
+                  >
+                    <QrCode className="w-4 h-4" />
+                    Ver vinculador
+                    <ExternalLink className="w-3.5 h-3.5 opacity-70" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleLogoutWhatsApp}
+                    disabled={actionLoading || logoutLoading}
+                    className="border-destructive/30 text-destructive hover:bg-destructive/10 gap-2"
+                  >
+                    {logoutLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Link2Off className="w-4 h-4" />
+                    )}
+                    Cerrar sesión
+                  </Button>
+                </div>
               </div>
             ) : botStatus === "esperando_vinculacion" && botQrCode ? (
               <div className="flex flex-col lg:flex-row items-center justify-center gap-10 p-6">
@@ -574,6 +592,15 @@ export default function GruposPage() {
                   <p className="text-xs text-amber-500/90 font-medium">
                     ⚠️ El código se actualiza automáticamente. Mantén esta pantalla abierta.
                   </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    render={<Link href="/vincular" target="_blank" />}
+                    className="gap-2"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Abrir QR en pantalla dedicada
+                  </Button>
                 </div>
                 <div className="relative p-5 bg-white rounded-3xl shadow-xl border border-border/80 flex items-center justify-center overflow-hidden">
                   <img
@@ -592,19 +619,30 @@ export default function GruposPage() {
                     <WifiOff className="w-10 h-10" />
                   </div>
                   <div className="space-y-2 text-left flex-1">
-                    <h3 className="font-bold text-foreground text-base">El servicio del Bot está inactivo</h3>
+                    <h3 className="font-bold text-foreground text-base">{botConnectionView.title}</h3>
                     <p className="text-sm text-muted-foreground max-w-2xl">
-                      El asistente de WhatsApp se encuentra desconectado. Para vincular un número de teléfono y comenzar a registrar gastos, asegúrate de que el servicio del bot esté activo en el servidor.
+                      {botStatus === "esperando_vinculacion"
+                        ? "El bot está preparando un código QR. Si no aparece en unos segundos, abrí la pantalla dedicada y verificá que el proceso del bot esté corriendo."
+                        : "El asistente de WhatsApp se encuentra desconectado. Para vincular un número de teléfono y comenzar a registrar gastos, abrí la vinculación y verificá que el servicio del bot esté activo en el servidor."}
                     </p>
                   </div>
-                  <div className="shrink-0 self-start md:self-center">
+                  <div className="flex flex-wrap gap-2 shrink-0 self-start md:self-center">
                     <Button
+                      render={<Link href="/vincular" target="_blank" />}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2 font-medium"
+                    >
+                      <QrCode className="w-4 h-4" />
+                      {botConnectionView.actionLabel}
+                      <ExternalLink className="w-3.5 h-3.5 opacity-80" />
+                    </Button>
+                    <Button
+                      variant="outline"
                       onClick={() => fetchBotStatus(true)}
                       disabled={refreshingStatus}
-                      className="bg-amber-600 hover:bg-amber-700 text-white gap-2 font-medium"
+                      className="gap-2"
                     >
                       <RefreshCw className={`w-4 h-4 ${refreshingStatus ? "animate-spin" : ""}`} />
-                      Reintentar Conexión
+                      Reintentar conexión
                     </Button>
                   </div>
                 </div>
@@ -790,7 +828,7 @@ export default function GruposPage() {
                   {testState === "idle" && (
                     <div className="space-y-4">
                       <p className="text-sm text-muted-foreground">
-                        Al hacer clic, el bot enviará un mensaje de saludo al grupo <span className="font-bold text-foreground">"{linkedGroup.name}"</span> confirmando la vinculación.
+                        Al hacer clic, el bot enviará un mensaje de saludo al grupo <span className="font-bold text-foreground">&quot;{linkedGroup.name}&quot;</span> confirmando la vinculación.
                       </p>
                       <Button
                         onClick={sendTestMessage}
