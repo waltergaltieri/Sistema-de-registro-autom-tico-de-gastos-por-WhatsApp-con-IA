@@ -61,6 +61,53 @@ async function checkPendingCommands(client) {
               command_id: cmd.id,
               status: "completed"
             });
+          } else if (cmd.command === "logout_whatsapp") {
+            console.log("🤖 Comando de cierre de sesión de WhatsApp recibido...");
+            
+            // 1. Resolve command in db
+            await sendToBackend("/api/bot/commands", {
+              action: "resolve",
+              command_id: cmd.id,
+              status: "completed"
+            });
+            
+            // 2. Delete session data file if it exists to ensure a clean slate
+            const fs = require("fs");
+            const path = require("path");
+            const sessionId = process.env.OPENWA_SESSION_ID || "gastos-socios";
+            const sessionFilePath = path.join(process.cwd(), `${sessionId}.data.json`);
+            
+            try {
+              if (fs.existsSync(sessionFilePath)) {
+                fs.unlinkSync(sessionFilePath);
+                console.log(`🗑️ Archivo de sesión eliminado: ${sessionFilePath}`);
+              }
+            } catch (fsErr) {
+              console.error("❌ Error al eliminar el archivo de sesión:", fsErr.message);
+            }
+
+            // 3. Try to log out the client
+            try {
+              if (typeof client.logOut === "function") {
+                await client.logOut();
+              } else if (typeof client.logout === "function") {
+                await client.logout();
+              } else {
+                console.warn("⚠️ No se encontró la función logout/logOut en el cliente.");
+              }
+            } catch (logoutErr) {
+              console.error("❌ Error al invocar logout del cliente:", logoutErr.message);
+            }
+
+            console.log("✅ Sesión cerrada. Reiniciando bot para generar nuevo código QR...");
+            
+            // 4. Update status to disconnected in Supabase
+            await sendToBackend("/api/bot/qr-status", {
+              status: "desconectado"
+            });
+
+            // 5. Exit so process manager restarts it
+            process.exit(0);
           } else {
             throw new Error(`Comando no reconocido: ${cmd.command}`);
           }
@@ -273,7 +320,7 @@ async function sendToBackend(path, body) {
 create({
   sessionId: process.env.OPENWA_SESSION_ID || "gastos-socios",
   multiDevice: true,
-  authTimeout: 60,
+  authTimeout: 0,
   blockCrashLogs: true,
   disableSpins: true,
   headless: true,

@@ -81,6 +81,7 @@ export default function GruposPage() {
   const [searchFeedback, setSearchFeedback] = useState<{ type: "success" | "error" | null; message: string }>({ type: null, message: "" });
   const [linkedGroup, setLinkedGroup] = useState<WhatsAppGroup | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [logoutLoading, setLogoutLoading] = useState(false);
 
   // Test Message Command
   const [testState, setTestState] = useState<"idle" | "queuing" | "polling" | "delivered" | "failed">("idle");
@@ -363,6 +364,53 @@ export default function GruposPage() {
     }
   };
 
+  const handleLogoutWhatsApp = async () => {
+    if (!confirm("¿Estás seguro de que quieres cerrar la sesión de WhatsApp del bot? Esto detendrá el registro de gastos hasta que vincules una nueva cuenta.")) return;
+    
+    setLogoutLoading(true);
+    try {
+      const res = await fetch("/api/bot/commands", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "queue",
+          command: "logout_whatsapp",
+          payload: {}
+        }),
+      });
+
+      const data = await res.json();
+      if (data.ok && data.command?.id) {
+        // Poll for status changes
+        let attempts = 0;
+        const interval = setInterval(async () => {
+          attempts++;
+          const statusRes = await fetch("/api/bot/status");
+          const statusData = await statusRes.json();
+          if (statusData.ok) {
+            if (statusData.status !== "conectado" || attempts > 15) {
+              clearInterval(interval);
+              setBotStatus(statusData.status);
+              setBotQrCode(statusData.qr_code);
+              setLogoutLoading(false);
+              if (statusData.status !== "conectado") {
+                alert("Sesión de WhatsApp cerrada con éxito. El bot se está reiniciando para generar un nuevo código QR.");
+              } else {
+                alert("No se pudo confirmar el cierre de sesión en el bot, pero el comando fue enviado. Por favor actualiza la página en unos segundos.");
+              }
+            }
+          }
+        }, 2000);
+      } else {
+        throw new Error(data.error || "No se pudo encolar el comando de cierre de sesión.");
+      }
+    } catch (err: any) {
+      console.error("Error logging out WhatsApp:", err);
+      alert(err.message || "Error al intentar cerrar la sesión.");
+      setLogoutLoading(false);
+    }
+  };
+
   const sendTestMessage = async () => {
     if (!linkedGroup) return;
     setTestState("queuing");
@@ -486,16 +534,32 @@ export default function GruposPage() {
           </CardHeader>
           <CardContent className="p-6 space-y-6">
             {botStatus === "conectado" ? (
-              <div className="flex flex-col md:flex-row items-center gap-6 p-6 rounded-2xl bg-emerald-500/5 border border-emerald-500/20">
-                <div className="p-3 bg-emerald-500/10 rounded-full text-emerald-500">
-                  <CheckCircle2 className="w-10 h-10" />
+              <div className="flex flex-col md:flex-row items-center justify-between gap-6 p-6 rounded-2xl bg-emerald-500/5 border border-emerald-500/20">
+                <div className="flex items-center gap-6">
+                  <div className="p-3 bg-emerald-500/10 rounded-full text-emerald-500 shrink-0">
+                    <CheckCircle2 className="w-10 h-10" />
+                  </div>
+                  <div className="space-y-1 text-left">
+                    <h3 className="font-bold text-foreground text-base">¡WhatsApp Vinculado Exitosamente!</h3>
+                    <p className="text-sm text-muted-foreground max-w-xl">
+                      La sesión del bot de WhatsApp está activa y en línea. El bot está listo para escuchar y registrar los mensajes de tu grupo configurado.
+                    </p>
+                  </div>
                 </div>
-                <div className="space-y-1 text-center md:text-left">
-                  <h3 className="font-bold text-foreground text-base">¡WhatsApp Vinculado Exitosamente!</h3>
-                  <p className="text-sm text-muted-foreground max-w-xl">
-                    La sesión del bot de WhatsApp está activa y en línea. El bot está listo para escuchar y registrar los mensajes de tu grupo configurado.
-                  </p>
-                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLogoutWhatsApp}
+                  disabled={actionLoading || logoutLoading}
+                  className="border-destructive/30 text-destructive hover:bg-destructive/10 gap-2 shrink-0 self-start md:self-center"
+                >
+                  {logoutLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Link2Off className="w-4 h-4" />
+                  )}
+                  Cerrar Sesión de WhatsApp
+                </Button>
               </div>
             ) : botStatus === "esperando_vinculacion" && botQrCode ? (
               <div className="flex flex-col lg:flex-row items-center justify-center gap-10 p-6">
@@ -522,23 +586,27 @@ export default function GruposPage() {
                 </div>
               </div>
             ) : (
-              <div className="space-y-4">
-                <div className="flex flex-col md:flex-row items-center gap-6 p-6 rounded-2xl bg-destructive/5 border border-destructive/20">
-                  <div className="p-3 bg-destructive/10 rounded-full text-destructive">
+              <div className="space-y-6">
+                <div className="flex flex-col md:flex-row items-center gap-6 p-6 rounded-2xl bg-amber-500/5 border border-amber-500/20">
+                  <div className="p-3 bg-amber-500/10 rounded-full text-amber-500 shrink-0">
                     <WifiOff className="w-10 h-10" />
                   </div>
-                  <div className="space-y-1 text-center md:text-left">
-                    <h3 className="font-bold text-foreground text-base">El Bot está desconectado</h3>
-                    <p className="text-sm text-muted-foreground">
-                      El servidor del bot de WhatsApp no se encuentra encendido o se cerró su sesión.
+                  <div className="space-y-2 text-left flex-1">
+                    <h3 className="font-bold text-foreground text-base">El servicio del Bot está inactivo</h3>
+                    <p className="text-sm text-muted-foreground max-w-2xl">
+                      El asistente de WhatsApp se encuentra desconectado. Para vincular un número de teléfono y comenzar a registrar gastos, asegúrate de que el servicio del bot esté activo en el servidor.
                     </p>
                   </div>
-                </div>
-                <div className="p-4 rounded-xl bg-muted/40 border text-xs text-muted-foreground space-y-2">
-                  <p className="font-semibold text-foreground">¿Cómo iniciar el bot?</p>
-                  <p>
-                    Asegúrate de ejecutar la consola del bot en tu servidor local o de hosting con el comando <code className="bg-muted px-1.5 py-0.5 rounded font-mono text-[11px] text-indigo-500">npm run dev</code> en la carpeta <code className="bg-muted px-1.5 py-0.5 rounded font-mono text-[11px]">bot-whatsapp</code>. Al iniciarse, generará un nuevo QR que aparecerá aquí automáticamente.
-                  </p>
+                  <div className="shrink-0 self-start md:self-center">
+                    <Button
+                      onClick={() => fetchBotStatus(true)}
+                      disabled={refreshingStatus}
+                      className="bg-amber-600 hover:bg-amber-700 text-white gap-2 font-medium"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${refreshingStatus ? "animate-spin" : ""}`} />
+                      Reintentar Conexión
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
