@@ -304,6 +304,12 @@ client.on("message", (message) => {
   handleMessage(client, message);
 });
 
+client.on("message_create", (message) => {
+  if (message.fromMe) {
+    handleMessage(client, message);
+  }
+});
+
 client.on("disconnected", async (reason) => {
   console.warn("WhatsApp desconectado:", reason);
   await sendToBackend("/api/bot/qr-status", { status: "desconectado" });
