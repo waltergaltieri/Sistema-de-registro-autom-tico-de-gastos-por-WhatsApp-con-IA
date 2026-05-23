@@ -178,8 +178,11 @@ async function handleMessage(client, message) {
     const messageText = message.body || "";
     const { phone: senderPhone, name: senderName } = await getMessageSender(client, message);
 
+    const normalizedText = messageText.trim().toLowerCase();
     const isCommand =
-      messageText.startsWith("/gastos") || messageText.startsWith("/gasto");
+      normalizedText.startsWith("/gastos") ||
+      normalizedText.startsWith("/gasto") ||
+      normalizedText.startsWith("corregir gasto");
 
     if (isCommand) {
       console.log(`Comando recibido de ${senderName}: ${messageText}`);

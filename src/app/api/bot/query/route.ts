@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { formatCurrency } from "@/lib/format";
+import {
+  buildExpenseCorrectionUpdate,
+  parseExpenseCorrectionCommand,
+} from "@/lib/expense-correction-command";
+import { resolveExpenseCategoryId } from "@/lib/expense-category";
 
 export async function POST(request: NextRequest) {
   try {
@@ -26,14 +31,73 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: false, reply_text: "Grupo no autorizado." });
     }
 
-    const text = (message_text || "").trim().toLowerCase();
+    const rawText = (message_text || "").trim();
+    const text = rawText.toLowerCase();
+    const { data: profile } = await supabase
+      .from("users_profile")
+      .select("id")
+      .eq("organization_id", org.id)
+      .eq("whatsapp_phone", sender_phone)
+      .single();
     let replyText = "No entendí la consulta. Probá con:\n/gastos total mayo\n/gastos ultimos\n/gastos categoria obra\n/gasto 123";
 
     // ==========================================
     // Command parsing
     // ==========================================
 
-    if (text.startsWith("/gastos total")) {
+    const correctionCommand = parseExpenseCorrectionCommand(rawText);
+
+    if (correctionCommand) {
+      const { data: expense } = await supabase
+        .from("expenses")
+        .select("id, category_id, expense_date, supplier_name, total_amount, review_status")
+        .eq("organization_id", org.id)
+        .eq("id", correctionCommand.expenseId)
+        .single();
+
+      if (!expense) {
+        replyText = `No encontre el gasto #${correctionCommand.expenseId}.`;
+      } else {
+        let categoryId: string | null = null;
+
+        if (correctionCommand.field === "categoria") {
+          const { data: categories } = await supabase
+            .from("expense_categories")
+            .select("id, name")
+            .eq("organization_id", org.id)
+            .eq("is_active", true);
+
+          categoryId = resolveExpenseCategoryId(categories || [], correctionCommand.value);
+        }
+
+        const correction = buildExpenseCorrectionUpdate(correctionCommand, categoryId);
+
+        if (!correction.ok) {
+          replyText = `No pude aplicar la correccion: ${correction.error}`;
+        } else {
+          const { error: updateError } = await supabase
+            .from("expenses")
+            .update(correction.updates)
+            .eq("organization_id", org.id)
+            .eq("id", correctionCommand.expenseId);
+
+          if (updateError) {
+            replyText = "No pude actualizar el gasto. Intenta de nuevo.";
+          } else {
+            await supabase.from("expense_audit_logs").insert({
+              organization_id: org.id,
+              expense_id: correctionCommand.expenseId,
+              actor_profile_id: profile?.id || null,
+              action: "corrected_by_whatsapp",
+              old_data: expense,
+              new_data: correction.updates,
+            });
+
+            replyText = `Gasto #${correctionCommand.expenseId} actualizado: ${correction.label} = ${correction.displayValue}.`;
+          }
+        }
+      }
+    } else if (text.startsWith("/gastos total")) {
       // Total expenses for current month
       const { data: expenses } = await supabase
         .from("expenses")
@@ -178,13 +242,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Log the query
-    const { data: profile } = await supabase
-      .from("users_profile")
-      .select("id")
-      .eq("organization_id", org.id)
-      .eq("whatsapp_phone", sender_phone)
-      .single();
-
     await supabase.from("query_logs").insert({
       organization_id: org.id,
       requester_profile_id: profile?.id || null,

@@ -9,6 +9,7 @@ import {
   isIncomingMessageTooOld,
 } from "@/lib/incoming-expense";
 import { resolveExpenseCategoryId } from "@/lib/expense-category";
+import { buildMissingFieldsPrompt } from "@/lib/expense-reply";
 import crypto from "crypto";
 
 export async function POST(request: NextRequest) {
@@ -315,6 +316,7 @@ export async function POST(request: NextRequest) {
     // 16. Build reply
     const partnerName = userProfile?.full_name || sender_name;
     let replyText: string;
+    const missingFieldsPrompt = buildMissingFieldsPrompt(expense.id, aiResult);
 
     if (aiResult.confidence >= 0.7 && aiResult.total_amount) {
       replyText = [
@@ -344,6 +346,10 @@ export async function POST(request: NextRequest) {
         `Registro: #${expense.id}`,
         `Podés corregirlo desde el dashboard o responder con una aclaración.`,
       ].join("\n");
+    }
+
+    if (missingFieldsPrompt) {
+      replyText = `${replyText}\n${missingFieldsPrompt}`;
     }
 
     // 17. Update bot log status
