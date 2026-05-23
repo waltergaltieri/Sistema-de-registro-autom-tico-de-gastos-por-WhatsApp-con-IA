@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  parseExpenseCorrectionCommands,
   buildExpenseCorrectionUpdate,
   parseExpenseCorrectionCommand,
 } from "./expense-correction-command";
@@ -29,6 +30,34 @@ describe("parseExpenseCorrectionCommand", () => {
 
   it("ignores unrelated messages", () => {
     expect(parseExpenseCorrectionCommand("hola")).toBeNull();
+  });
+});
+
+describe("parseExpenseCorrectionCommands", () => {
+  const today = new Date("2026-05-23T12:00:00.000Z");
+
+  it("parses natural category and today date corrections without an explicit expense id", () => {
+    expect(
+      parseExpenseCorrectionCommands(
+        "En categoria ponele Equipamiento y fecha la de hoy",
+        today
+      )
+    ).toEqual([
+      { field: "categoria", value: "Equipamiento" },
+      { field: "fecha", value: "23/05/2026" },
+    ]);
+  });
+
+  it("keeps an explicit expense id when present and parses multiple fields", () => {
+    expect(
+      parseExpenseCorrectionCommands(
+        "corregir gasto 5 categoria Equipamiento y fecha la de hoy",
+        today
+      )
+    ).toEqual([
+      { expenseId: 5, field: "categoria", value: "Equipamiento" },
+      { expenseId: 5, field: "fecha", value: "23/05/2026" },
+    ]);
   });
 });
 

@@ -3,7 +3,7 @@ import type { ReviewStatus } from "./types";
 export type ExpenseCorrectionField = "fecha" | "monto" | "proveedor" | "categoria";
 
 export interface ExpenseCorrectionCommand {
-  expenseId: number;
+  expenseId?: number;
   field: ExpenseCorrectionField;
   value: string;
 }
@@ -27,19 +27,76 @@ type ExpenseCorrectionUpdate =
 export function parseExpenseCorrectionCommand(
   text: string
 ): ExpenseCorrectionCommand | null {
-  const match = text
-    .trim()
-    .match(/^corregir\s+gasto\s+(\d+)\s+(fecha|monto|proveedor|categoria)\s+(.+)$/i);
+  return parseExpenseCorrectionCommands(text)[0] || null;
+}
 
-  if (!match) {
-    return null;
+function normalizeText(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
+}
+
+function formatDateForCommand(date: Date) {
+  return [
+    String(date.getDate()).padStart(2, "0"),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getFullYear()),
+  ].join("/");
+}
+
+function cleanCorrectionValue(field: ExpenseCorrectionField, value: string, now: Date) {
+  let cleaned = value
+    .replace(/^[\s,.;:-]*(y\s+)?/i, "")
+    .replace(/\s+y\s*$/i, "")
+    .replace(/^[\s,.;:-]*(ponele|ponle|ponerle|ponela|ponelo|pon|pone|en|a|la|el|de)\s+/i, "")
+    .trim();
+
+  if (field === "fecha") {
+    const normalized = normalizeText(cleaned);
+    if (normalized === "hoy" || normalized === "la de hoy" || normalized === "de hoy") {
+      return formatDateForCommand(now);
+    }
   }
 
-  return {
-    expenseId: Number(match[1]),
-    field: match[2].toLowerCase() as ExpenseCorrectionField,
-    value: match[3].trim(),
-  };
+  return cleaned;
+}
+
+export function parseExpenseCorrectionCommands(
+  text: string,
+  now = new Date()
+): ExpenseCorrectionCommand[] {
+  const original = text.trim();
+  const normalized = normalizeText(original);
+  const expenseIdMatch = normalized.match(/\bgasto\s+(\d+)\b/);
+  const expenseId = expenseIdMatch ? Number(expenseIdMatch[1]) : undefined;
+  const fieldPattern = /\b(fecha|monto|proveedor|categoria)\b/g;
+  const fields = Array.from(normalized.matchAll(fieldPattern)).map((match) => ({
+    field: match[1] as ExpenseCorrectionField,
+    index: match.index || 0,
+    length: match[0].length,
+  }));
+
+  return fields
+    .map((field, index) => {
+      const next = fields[index + 1];
+      const rawValue = original.slice(
+        field.index + field.length,
+        next ? next.index : original.length
+      );
+      const value = cleanCorrectionValue(field.field, rawValue, now);
+
+      if (!value) {
+        return null;
+      }
+
+      return {
+        ...(expenseId ? { expenseId } : {}),
+        field: field.field,
+        value,
+      };
+    })
+    .filter((command): command is ExpenseCorrectionCommand => command !== null);
 }
 
 function parseArgentineDate(value: string) {

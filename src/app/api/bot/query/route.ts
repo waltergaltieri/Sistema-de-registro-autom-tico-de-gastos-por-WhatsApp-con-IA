@@ -3,9 +3,32 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { formatCurrency } from "@/lib/format";
 import {
   buildExpenseCorrectionUpdate,
-  parseExpenseCorrectionCommand,
+  parseExpenseCorrectionCommands,
 } from "@/lib/expense-correction-command";
-import { resolveExpenseCategoryId } from "@/lib/expense-category";
+
+function normalizeCategoryName(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .trim();
+}
+
+function resolveExactCategoryId(
+  categories: { id: string; name: string }[],
+  categoryName: string
+) {
+  const target = normalizeCategoryName(categoryName);
+  return (
+    categories.find((category) => normalizeCategoryName(category.name) === target)?.id ||
+    categories.find((category) => normalizeCategoryName(category.name).includes(target))?.id ||
+    null
+  );
+}
+
+function getBuenosAiresNow() {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: "America/Argentina/Buenos_Aires" }));
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,55 +68,80 @@ export async function POST(request: NextRequest) {
     // Command parsing
     // ==========================================
 
-    const correctionCommand = parseExpenseCorrectionCommand(rawText);
+    const correctionCommands = parseExpenseCorrectionCommands(rawText, getBuenosAiresNow());
 
-    if (correctionCommand) {
-      const { data: expense } = await supabase
+    if (correctionCommands.length > 0) {
+      const requestedExpenseId = correctionCommands.find((command) => command.expenseId)?.expenseId;
+      let expenseQuery = supabase
         .from("expenses")
-        .select("id, category_id, expense_date, supplier_name, total_amount, review_status")
-        .eq("organization_id", org.id)
-        .eq("id", correctionCommand.expenseId)
-        .single();
+        .select("id, category_id, expense_date, supplier_name, total_amount, review_status, created_at")
+        .eq("organization_id", org.id);
+
+      if (requestedExpenseId) {
+        expenseQuery = expenseQuery.eq("id", requestedExpenseId);
+      } else {
+        expenseQuery = expenseQuery
+          .eq("whatsapp_sender_phone", sender_phone)
+          .neq("review_status", "rejected")
+          .order("created_at", { ascending: false })
+          .limit(1);
+      }
+
+      const { data: expenses } = await expenseQuery;
+      const expense = Array.isArray(expenses) ? expenses[0] : expenses;
 
       if (!expense) {
-        replyText = `No encontre el gasto #${correctionCommand.expenseId}.`;
+        replyText = requestedExpenseId
+          ? `No encontre el gasto #${requestedExpenseId}.`
+          : "No encontre un gasto reciente tuyo para corregir.";
       } else {
-        let categoryId: string | null = null;
+        const { data: categories } = await supabase
+          .from("expense_categories")
+          .select("id, name")
+          .eq("organization_id", org.id)
+          .eq("is_active", true);
+        const updates: Record<string, unknown> = {};
+        const applied: string[] = [];
+        let correctionError: string | null = null;
 
-        if (correctionCommand.field === "categoria") {
-          const { data: categories } = await supabase
-            .from("expense_categories")
-            .select("id, name")
-            .eq("organization_id", org.id)
-            .eq("is_active", true);
+        for (const command of correctionCommands) {
+          const categoryId =
+            command.field === "categoria"
+              ? resolveExactCategoryId(categories || [], command.value)
+              : null;
+          const correction = buildExpenseCorrectionUpdate(command, categoryId);
 
-          categoryId = resolveExpenseCategoryId(categories || [], correctionCommand.value);
+          if (!correction.ok) {
+            correctionError = correction.error;
+            break;
+          }
+
+          Object.assign(updates, correction.updates);
+          applied.push(`${correction.label} = ${correction.displayValue}`);
         }
 
-        const correction = buildExpenseCorrectionUpdate(correctionCommand, categoryId);
-
-        if (!correction.ok) {
-          replyText = `No pude aplicar la correccion: ${correction.error}`;
+        if (correctionError) {
+          replyText = `No pude aplicar la correccion: ${correctionError}`;
         } else {
           const { error: updateError } = await supabase
             .from("expenses")
-            .update(correction.updates)
+            .update(updates)
             .eq("organization_id", org.id)
-            .eq("id", correctionCommand.expenseId);
+            .eq("id", expense.id);
 
           if (updateError) {
             replyText = "No pude actualizar el gasto. Intenta de nuevo.";
           } else {
             await supabase.from("expense_audit_logs").insert({
               organization_id: org.id,
-              expense_id: correctionCommand.expenseId,
+              expense_id: expense.id,
               actor_profile_id: profile?.id || null,
               action: "corrected_by_whatsapp",
               old_data: expense,
-              new_data: correction.updates,
+              new_data: updates,
             });
 
-            replyText = `Gasto #${correctionCommand.expenseId} actualizado: ${correction.label} = ${correction.displayValue}.`;
+            replyText = `Gasto #${expense.id} actualizado: ${applied.join(", ")}.`;
           }
         }
       }

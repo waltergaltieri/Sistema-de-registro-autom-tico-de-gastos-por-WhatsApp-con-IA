@@ -179,10 +179,20 @@ async function handleMessage(client, message) {
     const { phone: senderPhone, name: senderName } = await getMessageSender(client, message);
 
     const normalizedText = messageText.trim().toLowerCase();
+    const looksLikeCorrection =
+      normalizedText.startsWith("en categoria") ||
+      normalizedText.startsWith("en categoría") ||
+      normalizedText.startsWith("categoria") ||
+      normalizedText.startsWith("categoría") ||
+      normalizedText.startsWith("fecha") ||
+      normalizedText.startsWith("monto") ||
+      normalizedText.startsWith("proveedor") ||
+      normalizedText.includes(" ponele ");
     const isCommand =
       normalizedText.startsWith("/gastos") ||
       normalizedText.startsWith("/gasto") ||
-      normalizedText.startsWith("corregir gasto");
+      normalizedText.startsWith("corregir gasto") ||
+      looksLikeCorrection;
 
     if (isCommand) {
       console.log(`Comando recibido de ${senderName}: ${messageText}`);
