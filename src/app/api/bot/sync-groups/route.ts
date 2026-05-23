@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { shouldAutoLinkSyncedWhatsAppGroup } from "@/lib/whatsapp-groups";
 
 const PRESET_COLORS = [
   "#3b82f6", // Blue
@@ -65,8 +66,13 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
-      // Automatically link the organization to this group if it's the only one
-      if (!defaultOrg.whatsapp_group_id) {
+      // Never guess the accounting group. It must be selected by an admin.
+      if (
+        shouldAutoLinkSyncedWhatsAppGroup({
+          currentLinkedGroupId: defaultOrg.whatsapp_group_id,
+          syncedGroupCount: groups.length,
+        })
+      ) {
         await supabase
           .from("organizations")
           .update({ whatsapp_group_id: group.id })
