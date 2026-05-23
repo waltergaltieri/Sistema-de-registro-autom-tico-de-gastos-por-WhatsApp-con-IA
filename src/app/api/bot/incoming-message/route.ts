@@ -256,10 +256,21 @@ export async function POST(request: NextRequest) {
       });
     } catch (aiError) {
       console.error("Gemini error:", aiError);
+      const errorMessage =
+        aiError instanceof Error ? aiError.message : "Gemini processing failed";
+
       await supabase
         .from("expenses")
         .update({ ai_status: "failed" })
         .eq("id", expense.id);
+
+      await supabase
+        .from("bot_message_logs")
+        .update({
+          processing_status: "failed",
+          error_message: errorMessage,
+        })
+        .eq("whatsapp_message_id", message_id);
 
       return NextResponse.json({
         ok: true,

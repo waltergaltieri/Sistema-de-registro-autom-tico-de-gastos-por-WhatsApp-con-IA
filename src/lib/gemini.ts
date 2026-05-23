@@ -9,6 +9,14 @@ interface ProcessExpenseInput {
   categories: string[];
 }
 
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite";
+
+export function getGeminiModelCandidates(configuredModel: string | undefined) {
+  return Array.from(
+    new Set([configuredModel?.trim() || DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_MODEL])
+  );
+}
+
 /**
  * Process an expense receipt image using Google Gemini Vision API.
  * Returns structured expense data extracted from the image.
@@ -17,59 +25,66 @@ export async function processExpenseWithGemini(
   input: ProcessExpenseInput
 ): Promise<GeminiExpenseResponse> {
   const apiKey = process.env.GEMINI_API_KEY;
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY is not configured");
   }
 
   const systemPrompt = buildSystemPrompt(input.categories);
   const userPrompt = buildUserPrompt(input);
+  const models = getGeminiModelCandidates(process.env.GEMINI_MODEL);
+  let lastError: Error | null = null;
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: systemPrompt + "\n\n" + userPrompt },
-              {
-                inlineData: {
-                  mimeType: input.mimeType,
-                  data: input.imageBase64,
+  for (const model of models) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: systemPrompt + "\n\n" + userPrompt },
+                {
+                  inlineData: {
+                    mimeType: input.mimeType,
+                    data: input.imageBase64,
+                  },
                 },
-              },
-            ],
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.1,
+            responseMimeType: "application/json",
+            responseSchema: getResponseSchema(),
           },
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: "application/json",
-          responseSchema: getResponseSchema(),
-        },
-      }),
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Gemini API error (${model}):`, errorText);
+      lastError = new Error(`Gemini API error (${model}): ${response.status}`);
+      continue;
     }
-  );
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Gemini API error:", errorText);
-    throw new Error(`Gemini API error: ${response.status}`);
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!text) {
+      lastError = new Error(`No response from Gemini (${model})`);
+      continue;
+    }
+
+    const parsed: GeminiExpenseResponse = JSON.parse(text);
+
+    // Validate and normalize
+    return normalizeGeminiResponse(parsed);
   }
 
-  const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-  if (!text) {
-    throw new Error("No response from Gemini");
-  }
-
-  const parsed: GeminiExpenseResponse = JSON.parse(text);
-
-  // Validate and normalize
-  return normalizeGeminiResponse(parsed);
+  throw lastError || new Error("Gemini API error");
 }
 
 function buildSystemPrompt(categories: string[]): string {
