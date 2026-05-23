@@ -9,6 +9,7 @@ const { getContactPhone, normalizePhone } = require("./phone");
 const API_URL = process.env.PROCESSING_API_URL;
 const WEBHOOK_SECRET = process.env.BOT_WEBHOOK_SECRET;
 const SESSION_ID = process.env.OPENWA_SESSION_ID || "gastos-socios";
+const MAX_MESSAGE_AGE_HOURS = Number(process.env.BOT_MAX_MESSAGE_AGE_HOURS || 24);
 
 if (!API_URL || !WEBHOOK_SECRET) {
   console.error("Faltan PROCESSING_API_URL o BOT_WEBHOOK_SECRET en .env");
@@ -17,6 +18,15 @@ if (!API_URL || !WEBHOOK_SECRET) {
 
 function getParticipantId(participant) {
   return participant?.id?._serialized || participant?.id?.user || participant?.id || "";
+}
+
+function isMessageTooOld(timestamp) {
+  if (!timestamp || !Number.isFinite(MAX_MESSAGE_AGE_HOURS) || MAX_MESSAGE_AGE_HOURS <= 0) {
+    return false;
+  }
+
+  const messageAgeMs = Date.now() - timestamp * 1000;
+  return messageAgeMs > MAX_MESSAGE_AGE_HOURS * 60 * 60 * 1000;
 }
 
 async function sendToBackend(routePath, body) {
@@ -174,6 +184,13 @@ async function handleMessage(client, message) {
 
     if (!message.hasMedia) return;
 
+    if (isMessageTooOld(message.timestamp)) {
+      console.log(
+        `Ignorando comprobante viejo de ${senderName}: mensaje anterior a ${MAX_MESSAGE_AGE_HOURS} horas`
+      );
+      return;
+    }
+
     const media = await message.downloadMedia();
     if (!media?.data || !media.mimetype) {
       console.error("No se pudo descargar el archivo");
@@ -245,6 +262,7 @@ const client = new Client({
   puppeteer: {
     headless: true,
     executablePath: process.env.CHROME_BIN || "/usr/bin/chromium-browser",
+    protocolTimeout: 120000,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   },
 });

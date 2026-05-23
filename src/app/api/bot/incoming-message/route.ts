@@ -2,8 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { processExpenseWithGemini } from "@/lib/gemini";
 import {
+  buildStaleMessageReply,
   buildStorageUploadFailureReply,
+  getMaxIncomingMessageAgeHours,
   getOrganizationFileHashFilters,
+  isIncomingMessageTooOld,
 } from "@/lib/incoming-expense";
 import { resolveExpenseCategoryId } from "@/lib/expense-category";
 import crypto from "crypto";
@@ -44,8 +47,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 3. Log the incoming message
-    await supabase.from("bot_message_logs").insert({
+    // 3. Log the incoming message without multiplying retries for the same WhatsApp id.
+    const incomingLog = {
       organization_id: org.id,
       whatsapp_message_id: message_id,
       whatsapp_chat_id: chat_id,
@@ -56,9 +59,43 @@ export async function POST(request: NextRequest) {
       has_media,
       processing_status: "received",
       raw_payload: body,
-    });
+    };
 
-    // 4. Check if has media (required for expense registration)
+    const { data: existingLog } = await supabase
+      .from("bot_message_logs")
+      .select("id")
+      .eq("whatsapp_message_id", message_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingLog) {
+      await supabase
+        .from("bot_message_logs")
+        .update(incomingLog)
+        .eq("id", existingLog.id);
+    } else {
+      await supabase.from("bot_message_logs").insert(incomingLog);
+    }
+
+    // 4. Reject old WhatsApp messages before touching storage or AI.
+    const maxMessageAgeHours = getMaxIncomingMessageAgeHours(
+      process.env.BOT_MAX_MESSAGE_AGE_HOURS
+    );
+
+    if (isIncomingMessageTooOld(sent_at, new Date(), maxMessageAgeHours)) {
+      await supabase
+        .from("bot_message_logs")
+        .update({
+          processing_status: "ignored",
+          error_message: "Message too old",
+        })
+        .eq("whatsapp_message_id", message_id);
+
+      return NextResponse.json(buildStaleMessageReply(maxMessageAgeHours));
+    }
+
+    // 5. Check if has media (required for expense registration)
     if (!has_media || !media?.base64) {
       return NextResponse.json({
         ok: false,
@@ -66,7 +103,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 5. Check for duplicate message
+    // 6. Check for duplicate message
     const { data: existingExpense } = await supabase
       .from("expenses")
       .select("id")
@@ -80,7 +117,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 6. Find user profile by phone
+    // 7. Find user profile by phone
     const { data: userProfile } = await supabase
       .from("users_profile")
       .select("id, full_name")
@@ -88,7 +125,7 @@ export async function POST(request: NextRequest) {
       .eq("whatsapp_phone", sender_phone)
       .single();
 
-    // 7. Upload file to Supabase Storage
+    // 8. Upload file to Supabase Storage
     const fileBuffer = Buffer.from(media.base64, "base64");
     const fileHash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
     const ext = media.mime_type?.split("/")[1] || "jpg";
@@ -133,7 +170,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(buildStorageUploadFailureReply(), { status: 500 });
     }
 
-    // 8. Create preliminary expense record
+    // 9. Create preliminary expense record
     const { data: expense, error: insertError } = await supabase
       .from("expenses")
       .insert({
@@ -159,8 +196,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 9. Save file record
-    await supabase.from("expense_files").insert({
+    // 10. Save file record
+    const { error: fileInsertError } = await supabase.from("expense_files").insert({
       organization_id: org.id,
       expense_id: expense.id,
       storage_bucket: "expense-receipts",
@@ -171,7 +208,32 @@ export async function POST(request: NextRequest) {
       file_sha256: fileHash,
     });
 
-    // 10. Get categories for AI context
+    if (fileInsertError) {
+      console.error("Expense file insert error:", fileInsertError);
+      await supabase
+        .from("expenses")
+        .update({ ai_status: "failed" })
+        .eq("id", expense.id);
+
+      await supabase
+        .from("bot_message_logs")
+        .update({
+          processing_status: "failed",
+          error_message: "Expense file insert failed",
+        })
+        .eq("whatsapp_message_id", message_id);
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Failed to save expense file",
+          reply_text: "âš ï¸ No pude guardar el archivo del comprobante. IntentÃ¡ enviarlo nuevamente.",
+        },
+        { status: 500 }
+      );
+    }
+
+    // 11. Get categories for AI context
     const { data: categories } = await supabase
       .from("expense_categories")
       .select("id, name")
