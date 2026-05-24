@@ -56,6 +56,7 @@ import {
   Loader2,
   AlertCircle,
   Calendar,
+  ExternalLink,
 } from "lucide-react";
 import { formatCurrency, formatDate, getStatusInfo, getConfidenceInfo } from "@/lib/format";
 import type { Expense, ReviewStatus, ExpenseCategory, UserProfile } from "@/lib/types";
@@ -124,7 +125,8 @@ export default function GastosPage() {
         .select(`
           *,
           category:expense_categories(*),
-          created_by:users_profile(*)
+          created_by:users_profile(*),
+          files:expense_files(*)
         `)
         .order("created_at", { ascending: false });
 
@@ -356,7 +358,12 @@ export default function GastosPage() {
                         onClick={() => setSelectedExpense(exp)}
                       >
                         <TableCell className="font-mono text-xs text-muted-foreground">
-                          {exp.id}
+                          <div className="flex items-center gap-1.5">
+                            <span>{exp.id}</span>
+                            {!!exp.files?.length && (
+                              <FileImage className="h-3.5 w-3.5 text-primary" />
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell className="text-sm whitespace-nowrap">
                           {formatDate(exp.expense_date || null)}
@@ -477,6 +484,66 @@ function ExpenseDetailDialog({
   onEdit: () => void;
   onStatusUpdate: (id: number, status: ReviewStatus) => Promise<void>;
 }) {
+  const [preview, setPreview] = useState<{ fileId: string; signedUrl: string } | null>(null);
+  const [fileLoading, setFileLoading] = useState(false);
+  const primaryFile = expense?.files?.[0] || null;
+  const isImageFile = primaryFile?.mime_type?.startsWith("image/");
+  const previewUrl = preview && preview.fileId === primaryFile?.id ? preview.signedUrl : null;
+
+  useEffect(() => {
+    if (!expense?.id || !primaryFile || !isImageFile) {
+      return;
+    }
+
+    const expenseId = expense.id;
+    const fileId = primaryFile.id;
+    let cancelled = false;
+
+    async function loadPreview() {
+      try {
+        setFileLoading(true);
+        const response = await fetch(`/api/expenses/${expenseId}/files/${fileId}/signed-url`);
+        const data = await response.json();
+
+        if (!cancelled && response.ok) {
+          setPreview({ fileId, signedUrl: data.signedUrl });
+        }
+      } catch (error) {
+        console.error("Error loading receipt preview:", error);
+      } finally {
+        if (!cancelled) {
+          setFileLoading(false);
+        }
+      }
+    }
+
+    loadPreview();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [expense?.id, primaryFile?.id, isImageFile]);
+
+  async function openFile(fileId: string, download = false) {
+    if (!expense?.id) return;
+
+    try {
+      const response = await fetch(
+        `/api/expenses/${expense.id}/files/${fileId}/signed-url${download ? "?download=1" : ""}`
+      );
+      const data = await response.json();
+
+      if (!response.ok || !data.signedUrl) {
+        throw new Error(data.error || "No se pudo abrir el comprobante");
+      }
+
+      window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      console.error("Error opening receipt file:", error);
+      alert("No se pudo abrir el comprobante");
+    }
+  }
+
   if (!expense) return null;
   const status = getStatusInfo(expense.review_status || "pending");
   const confidence = getConfidenceInfo(expense.ai_confidence ?? null);
@@ -514,6 +581,73 @@ function ExpenseDetailDialog({
             <DetailField label="Método de pago" value={expense.payment_method?.replace("_", " ") || "—"} />
             <DetailField label="Categoría" value={expense.category?.name || "Otros"} />
             <DetailField label="Rendido por" value={partnerName} />
+          </div>
+
+          <Separator />
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <Label className="text-xs text-muted-foreground block">Comprobante adjunto</Label>
+              {!!expense.files?.length && (
+                <Badge variant="secondary" className="text-xs">
+                  {expense.files.length} archivo{expense.files.length === 1 ? "" : "s"}
+                </Badge>
+              )}
+            </div>
+
+            {expense.files?.length ? (
+              <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-3">
+                {primaryFile && isImageFile && (
+                  <div className="overflow-hidden rounded-lg border border-border bg-background">
+                    {fileLoading && !previewUrl ? (
+                      <div className="flex h-48 items-center justify-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Cargando vista previa...
+                      </div>
+                    ) : previewUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={previewUrl}
+                        alt={primaryFile.original_filename || "Comprobante"}
+                        className="max-h-96 w-full object-contain bg-white"
+                      />
+                    ) : null}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  {expense.files.map((file) => (
+                    <div
+                      key={file.id}
+                      className="flex flex-col gap-2 rounded-lg border border-border/60 bg-background p-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {file.original_filename || `Comprobante ${file.id}`}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {file.mime_type || "Archivo"}{file.file_size_bytes ? ` - ${Math.round(file.file_size_bytes / 1024)} KB` : ""}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        <Button variant="outline" size="sm" onClick={() => openFile(file.id)}>
+                          <ExternalLink className="mr-1.5 h-4 w-4" />
+                          Abrir
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => openFile(file.id, true)}>
+                          <Download className="mr-1.5 h-4 w-4" />
+                          Descargar
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
+                Este gasto no tiene comprobante adjunto.
+              </div>
+            )}
           </div>
 
           <Separator />
