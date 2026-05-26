@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getResponseSchema, normalizeGeminiResponse } from "./gemini";
+import { estimateGeminiCost, getResponseSchema, normalizeGeminiResponse } from "./gemini";
 import type { GeminiExpenseResponse } from "./types";
 
 const baseResponse: GeminiExpenseResponse = {
@@ -39,5 +39,33 @@ describe("getResponseSchema", () => {
       type: "NUMBER",
       nullable: true,
     });
+  });
+});
+
+describe("estimateGeminiCost", () => {
+  it("uses Gemini 2.5 Flash-Lite standard pricing for receipt image analysis", () => {
+    const cost = estimateGeminiCost("gemini-2.5-flash-lite", {
+      promptTokenCount: 10_000,
+      candidatesTokenCount: 500,
+      totalTokenCount: 10_500,
+    });
+
+    expect(cost).toMatchObject({
+      inputTokens: 10_000,
+      outputTokens: 500,
+      totalTokens: 10_500,
+      inputCostPer1MUsd: 0.1,
+      outputCostPer1MUsd: 0.4,
+    });
+    expect(cost.estimatedCostUsd).toBeCloseTo(0.0012, 8);
+  });
+
+  it("falls back to input plus output tokens when total tokens are missing", () => {
+    const cost = estimateGeminiCost("gemini-2.5-flash-lite", {
+      promptTokenCount: 100,
+      candidatesTokenCount: 25,
+    });
+
+    expect(cost.totalTokens).toBe(125);
   });
 });

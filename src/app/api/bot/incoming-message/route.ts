@@ -244,9 +244,9 @@ export async function POST(request: NextRequest) {
     const categoryNames = categories?.map((c) => c.name) || [];
 
     // 11. Process with Gemini
-    let aiResult;
+    let aiProcessing: Awaited<ReturnType<typeof processExpenseWithGemini>>;
     try {
-      aiResult = await processExpenseWithGemini({
+      aiProcessing = await processExpenseWithGemini({
         imageBase64: media.base64,
         mimeType: media.mime_type,
         messageText: message_text || "",
@@ -254,10 +254,37 @@ export async function POST(request: NextRequest) {
         sentAt: sent_at,
         categories: categoryNames,
       });
+
+      await supabase.from("ai_usage_logs").insert({
+        organization_id: org.id,
+        expense_id: expense.id,
+        provider: "google_gemini",
+        model: aiProcessing.model,
+        operation: "receipt_analysis",
+        status: "success",
+        input_tokens: aiProcessing.cost.inputTokens,
+        output_tokens: aiProcessing.cost.outputTokens,
+        total_tokens: aiProcessing.cost.totalTokens,
+        input_cost_per_1m_usd: aiProcessing.cost.inputCostPer1MUsd,
+        output_cost_per_1m_usd: aiProcessing.cost.outputCostPer1MUsd,
+        estimated_cost_usd: aiProcessing.cost.estimatedCostUsd,
+        latency_ms: aiProcessing.latencyMs,
+        raw_usage: aiProcessing.usageMetadata,
+      });
     } catch (aiError) {
       console.error("Gemini error:", aiError);
       const errorMessage =
         aiError instanceof Error ? aiError.message : "Gemini processing failed";
+
+      await supabase.from("ai_usage_logs").insert({
+        organization_id: org.id,
+        expense_id: expense.id,
+        provider: "google_gemini",
+        model: process.env.GEMINI_MODEL || "gemini-2.5-flash-lite",
+        operation: "receipt_analysis",
+        status: "failed",
+        error_message: errorMessage,
+      });
 
       await supabase
         .from("expenses")
@@ -278,6 +305,8 @@ export async function POST(request: NextRequest) {
         reply_text: `⚠️ Registré el comprobante (#${expense.id}) pero no pude analizarlo con IA. Revisalo desde el dashboard.`,
       });
     }
+
+    const aiResult = aiProcessing.expense;
 
     // 12. Match category. Unknown receipts fall back to the explicit "Otros" category.
     const categoryId = resolveExpenseCategoryId(

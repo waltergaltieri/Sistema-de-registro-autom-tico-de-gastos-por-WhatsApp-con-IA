@@ -146,6 +146,26 @@ export interface QueryLog {
   created_at: string;
 }
 
+export interface AIUsageLog {
+  id: string;
+  organization_id: string;
+  expense_id: number | null;
+  provider: string;
+  model: string;
+  operation: string;
+  status: "success" | "failed";
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  input_cost_per_1m_usd: number;
+  output_cost_per_1m_usd: number;
+  estimated_cost_usd: number;
+  latency_ms: number | null;
+  error_message: string | null;
+  raw_usage: Record<string, unknown> | null;
+  created_at: string;
+}
+
 // ==========================================
 // API Types
 // ==========================================

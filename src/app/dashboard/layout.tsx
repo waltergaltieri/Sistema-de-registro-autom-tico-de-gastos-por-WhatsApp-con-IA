@@ -35,6 +35,7 @@ import {
   ChevronRight,
   X,
   MessageSquare,
+  ShieldCheck,
 } from "lucide-react";
 import type { UserProfile } from "@/lib/types";
 
@@ -46,6 +47,7 @@ const navigation = [
   { name: "Grupos WhatsApp", href: "/dashboard/grupos", icon: MessageSquare, roles: ["super_admin", "admin"] },
   { name: "Exportar", href: "/dashboard/exportar", icon: FileDown, roles: ["super_admin", "admin"] },
   { name: "Logs", href: "/dashboard/logs", icon: AlertCircle, roles: ["super_admin", "admin"] },
+  { name: "Super Admin", href: "/dashboard/super-admin", icon: ShieldCheck, roles: ["super_admin"] },
 ];
 
 const roleLabels: Record<string, string> = {
@@ -356,4 +358,3 @@ export default function DashboardLayout({
     </div>
   );
 }
-

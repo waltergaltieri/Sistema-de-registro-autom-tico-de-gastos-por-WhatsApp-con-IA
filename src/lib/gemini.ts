@@ -9,7 +9,36 @@ interface ProcessExpenseInput {
   categories: string[];
 }
 
+export interface GeminiUsageMetadata {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  totalTokenCount?: number;
+  thoughtsTokenCount?: number;
+  [key: string]: unknown;
+}
+
+export interface GeminiCostEstimate {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  inputCostPer1MUsd: number;
+  outputCostPer1MUsd: number;
+  estimatedCostUsd: number;
+}
+
+export interface ProcessExpenseWithGeminiResult {
+  expense: GeminiExpenseResponse;
+  model: string;
+  usageMetadata: GeminiUsageMetadata | null;
+  cost: GeminiCostEstimate;
+  latencyMs: number;
+}
+
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite";
+const GEMINI_FLASH_LITE_INPUT_COST_PER_1M_USD = 0.1;
+const GEMINI_FLASH_LITE_OUTPUT_COST_PER_1M_USD = 0.4;
+const GEMINI_FLASH_INPUT_COST_PER_1M_USD = 0.3;
+const GEMINI_FLASH_OUTPUT_COST_PER_1M_USD = 2.5;
 
 export function getGeminiModelCandidates(configuredModel: string | undefined) {
   return Array.from(
@@ -23,7 +52,7 @@ export function getGeminiModelCandidates(configuredModel: string | undefined) {
  */
 export async function processExpenseWithGemini(
   input: ProcessExpenseInput
-): Promise<GeminiExpenseResponse> {
+): Promise<ProcessExpenseWithGeminiResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY is not configured");
@@ -35,6 +64,7 @@ export async function processExpenseWithGemini(
   let lastError: Error | null = null;
 
   for (const model of models) {
+    const startedAt = Date.now();
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
       {
@@ -79,12 +109,73 @@ export async function processExpenseWithGemini(
     }
 
     const parsed: GeminiExpenseResponse = JSON.parse(text);
+    const usageMetadata = isRecord(data.usageMetadata)
+      ? (data.usageMetadata as GeminiUsageMetadata)
+      : null;
 
     // Validate and normalize
-    return normalizeGeminiResponse(parsed);
+    return {
+      expense: normalizeGeminiResponse(parsed),
+      model,
+      usageMetadata,
+      cost: estimateGeminiCost(model, usageMetadata),
+      latencyMs: Date.now() - startedAt,
+    };
   }
 
   throw lastError || new Error("Gemini API error");
+}
+
+export function estimateGeminiCost(
+  model: string,
+  usageMetadata: GeminiUsageMetadata | null | undefined
+): GeminiCostEstimate {
+  const inputTokens = positiveInteger(usageMetadata?.promptTokenCount);
+  const outputTokens = positiveInteger(usageMetadata?.candidatesTokenCount);
+  const totalTokens = positiveInteger(usageMetadata?.totalTokenCount) || inputTokens + outputTokens;
+  const pricing = getGeminiPricing(model);
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    inputCostPer1MUsd: pricing.input,
+    outputCostPer1MUsd: pricing.output,
+    estimatedCostUsd:
+      (inputTokens / 1_000_000) * pricing.input +
+      (outputTokens / 1_000_000) * pricing.output,
+  };
+}
+
+function getGeminiPricing(model: string) {
+  if (model.includes("flash-lite")) {
+    return {
+      input: GEMINI_FLASH_LITE_INPUT_COST_PER_1M_USD,
+      output: GEMINI_FLASH_LITE_OUTPUT_COST_PER_1M_USD,
+    };
+  }
+
+  if (model.includes("flash")) {
+    return {
+      input: GEMINI_FLASH_INPUT_COST_PER_1M_USD,
+      output: GEMINI_FLASH_OUTPUT_COST_PER_1M_USD,
+    };
+  }
+
+  return {
+    input: GEMINI_FLASH_LITE_INPUT_COST_PER_1M_USD,
+    output: GEMINI_FLASH_LITE_OUTPUT_COST_PER_1M_USD,
+  };
+}
+
+function positiveInteger(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.round(value)
+    : 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function buildSystemPrompt(categories: string[]): string {
